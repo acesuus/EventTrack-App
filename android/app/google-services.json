@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "994330978958",
+    "project_id": "event-track-46f63",
+    "storage_bucket": "event-track-46f63.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994330978958:android:8cf84c94d8ea137989f7df",
+        "android_client_info": {
+          "package_name": "com.example.event_track"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJA4ijqG_Xz-qu8oChEY9iDT_ihjTBF24"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
