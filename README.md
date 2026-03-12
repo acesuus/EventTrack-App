@@ -1,4 +1,4 @@
-# event_track
+# EventTrack-App
 
 A new Flutter project.
 
