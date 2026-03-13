@@ -23,6 +23,44 @@
           "other_platform_oauth_client": []
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994330978958:android:a8e6edd17bd304b089f7df",
+        "android_client_info": {
+          "package_name": "com.example.event_track.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJA4ijqG_Xz-qu8oChEY9iDT_ihjTBF24"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994330978958:android:44100de1255c1e4689f7df",
+        "android_client_info": {
+          "package_name": "com.example.event_track.student"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJA4ijqG_Xz-qu8oChEY9iDT_ihjTBF24"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     }
   ],
   "configuration_version": "1"

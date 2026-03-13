@@ -11,7 +11,7 @@ plugins {
 android {
     namespace = "com.example.event_track"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -31,7 +31,23 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // ADD THIS BLOCK
+        flavorDimensions += "role"
+        productFlavors {
+            create("student") {
+                dimension = "role"
+                applicationIdSuffix = ".student"
+                manifestPlaceholders += mapOf("appName" to "EventTrack")
+            }
+            create("admin") {
+                dimension = "role"
+                applicationIdSuffix = ".admin"
+                manifestPlaceholders += mapOf("appName" to "EventTrack Admin")
+            }
+        }
     }
+
 
     buildTypes {
         release {
