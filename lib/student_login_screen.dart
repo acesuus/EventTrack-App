@@ -155,7 +155,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                 child: const Icon(Icons.school, color: Colors.white, size: 50),
               ),
               const SizedBox(height: 24),
-              Text('PSU Event Tracker', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _darkText)),
+              Text('Event Track', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _darkText)),
               const SizedBox(height: 8),
               Text('Palawan State University', style: TextStyle(fontSize: 14, color: _primaryGreen)),
               const SizedBox(height: 40),
@@ -184,7 +184,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
-                        hintText: 'student@psu.edu.ph',
+                        hintText: 'student@psu.palawan.edu.ph',
                         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
                         prefixIcon: Icon(Icons.mail_outline, color: Colors.grey.shade400),
                         contentPadding: const EdgeInsets.symmetric(vertical: 16),
@@ -243,27 +243,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                         child: Text('Forgot Password?', style: TextStyle(color: _primaryGreen, fontWeight: FontWeight.w600)),
                       ),
                     ),
-                    const SizedBox(height: 16),
 
-                    // Demo Credentials Box
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: _lightGreenBg,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Demo Credentials:', style: TextStyle(fontWeight: FontWeight.bold, color: _darkText, fontSize: 12)),
-                          const SizedBox(height: 8),
-                          Text('Email: student@psu.edu.ph', style: TextStyle(color: _primaryGreen, fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Text('Password: student123', style: TextStyle(color: _primaryGreen, fontSize: 12)),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),

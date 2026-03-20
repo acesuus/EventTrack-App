@@ -271,10 +271,10 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     LatLng initialCenter = _selectedLocation ?? const LatLng(9.7389, 118.7353);
 
     return _buildCard(
-      title: 'Location & Geofence',
+      title: 'Location',
       icon: Icons.location_on_outlined,
       children: [
-        _buildTextField('Venue Name *', 'e.g., PSU Main Auditorium', _venueName, (val) => _venueName = val),
+        _buildTextField('Venue Name *', 'e.g., PSU Gymnasium', _venueName, (val) => _venueName = val),
         _buildTextField('Venue Address', 'Full address', _venueAddress, (val) => _venueAddress = val),
         
         const Text('Tap the map to set Geofence Center *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
@@ -318,9 +318,21 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         ),
         const SizedBox(height: 16),
         
-        _buildTextField('Geofence Radius (meters) *', '100', _currentRadius.toString(), (val) {
-          setState(() { _currentRadius = double.tryParse(val) ?? 100.0; });
-        }, type: TextInputType.number),
+        const Text('Location Radius', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        Slider(
+          value: _currentRadius,
+          min: 10.0,
+          max: 5000.0,
+          divisions: 499,
+          activeColor: _primaryGreen,
+          label: '${_currentRadius.round()} m',
+          onChanged: (double value) {
+            setState(() {
+              _currentRadius = value;
+            });
+          },
+        ),
+        Text('Current Radius: ${_currentRadius.round()} meters', style: const TextStyle(fontSize: 12)),
         const Text('Typical range: 50-200 meters. Use 5000m for testing.', style: TextStyle(fontSize: 10, color: Colors.grey)),
       ],
     );

@@ -138,10 +138,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Row(
             children: [
               _buildStatCard(Icons.calendar_today, '1', 'Active Events'),
-              const SizedBox(width: 12),
-              _buildStatCard(Icons.people_outline, '0', 'Total Students'),
-              const SizedBox(width: 12),
-              _buildStatCard(Icons.trending_up, '0%', 'Avg.\nAttendance'),
             ],
           )
         ],
