@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'student_home_screen.dart'; // We will build this next
+import 'package:shared_preferences/shared_preferences.dart';
+import 'student_dashboard.dart';
 
 class StudentConsentScreen extends StatefulWidget {
   final String studentId; // Passed in after login
-  const StudentConsentScreen({super.key, required this.studentId});
+  final String studentName;
+
+  const StudentConsentScreen({
+    super.key,
+    required this.studentId,
+    required this.studentName,
+  });
 
   @override
   State<StudentConsentScreen> createState() => _StudentConsentScreenState();
@@ -27,7 +34,9 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
           return;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission is required for attendance.')),
+          const SnackBar(
+            content: Text('Location permission is required for attendance.'),
+          ),
         );
         return;
       }
@@ -38,22 +47,37 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location permissions are permanently denied. Please enable in settings.')),
+        const SnackBar(
+          content: Text(
+            'Location permissions are permanently denied. Please enable in settings.',
+          ),
+        ),
       );
       return;
     }
 
     // 2. Save Consent to Firestore
-    await FirebaseFirestore.instance.collection('users').doc(widget.studentId).set({
-      'hasConsented': true,
-      'consentDate': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.studentId)
+        .set({
+          'hasConsented': true,
+          'consentDate': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hasConsented', true);
 
     // 3. Move to the tracking screen
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => StudentHomeScreen(studentId: widget.studentId)),
+      MaterialPageRoute(
+        builder: (context) => StudentDashboardScreen(
+          studentId: widget.studentId,
+          studentName: widget.studentName,
+        ),
+      ),
     );
   }
 
@@ -62,7 +86,10 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Privacy & Consent', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Privacy & Consent',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: _primaryGreen,
         foregroundColor: Colors.white,
       ),
@@ -71,16 +98,32 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.privacy_tip_outlined, size: 60, color: Color(0xFF28A776)),
+            const Icon(
+              Icons.privacy_tip_outlined,
+              size: 60,
+              color: Color(0xFF28A776),
+            ),
             const SizedBox(height: 20),
             const Text(
               'How We Protect Your Data',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _buildPrivacyRule(Icons.location_off, 'No 24/7 Tracking', 'We only check your location when an event is actively happening.'),
-            _buildPrivacyRule(Icons.map, 'No Real-Time Maps', 'Admins cannot see where you are. They only see "Present" or "Absent".'),
-            _buildPrivacyRule(Icons.timer_off, 'Auto-Deactivation', 'GPS tracking stops the exact minute the event ends.'),
+            _buildPrivacyRule(
+              Icons.location_off,
+              'No 24/7 Tracking',
+              'We only check your location when an event is actively happening.',
+            ),
+            _buildPrivacyRule(
+              Icons.map,
+              'No Real-Time Maps',
+              'Admins cannot see where you are. They only see "Present" or "Absent".',
+            ),
+            _buildPrivacyRule(
+              Icons.timer_off,
+              'Auto-Deactivation',
+              'GPS tracking stops the exact minute the event ends.',
+            ),
             const Spacer(),
             Row(
               children: [
@@ -90,7 +133,9 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
                   onChanged: (val) => setState(() => _isAgreed = val ?? false),
                 ),
                 const Expanded(
-                  child: Text('I have read and agree to allow EventTrack to verify my location for attendance.'),
+                  child: Text(
+                    'I have read and agree to allow EventTrack to verify my location for attendance.',
+                  ),
                 ),
               ],
             ),
@@ -102,9 +147,14 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
                 onPressed: _isAgreed ? _requestPermissions : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: const Text('Grant Permission & Continue', style: TextStyle(color: Colors.white, fontSize: 16)),
+                child: const Text(
+                  'Grant Permission & Continue',
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
               ),
             ),
           ],
@@ -125,7 +175,13 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text(desc, style: TextStyle(color: Colors.grey.shade700)),
               ],

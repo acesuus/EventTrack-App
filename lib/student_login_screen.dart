@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'student_dashboard.dart';
+import 'student_consent_screen.dart';
 
 class StudentLoginScreen extends StatefulWidget {
   const StudentLoginScreen({super.key});
@@ -14,11 +15,11 @@ class StudentLoginScreen extends StatefulWidget {
 
 class _StudentLoginScreenState extends State<StudentLoginScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
+
   // Controllers for the new UI fields
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
+
   bool _isLoading = false;
   bool _obscurePassword = true;
 
@@ -33,10 +34,10 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     try {
       if (Platform.isIOS) {
         var iosInfo = await deviceInfo.iosInfo;
-        return iosInfo.identifierForVendor; 
+        return iosInfo.identifierForVendor;
       } else if (Platform.isAndroid) {
         var androidInfo = await deviceInfo.androidInfo;
-        return androidInfo.id; 
+        return androidInfo.id;
       }
     } catch (e) {
       debugPrint("Failed to get device ID: $e");
@@ -50,7 +51,11 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     String password = _passwordController.text.trim();
 
     if (emailOrId.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter both Email/ID and Password')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter both Email/ID and Password'),
+        ),
+      );
       return;
     }
 
@@ -58,12 +63,14 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
 
     try {
       // In a real app, you would use FirebaseAuth here.
-      // For this prototype, we simulate a successful login if fields aren't empty, 
+      // For this prototype, we simulate a successful login if fields aren't empty,
       // and use the email prefix as the "Student ID" for the database.
-      String studentId = emailOrId.split('@')[0]; 
-      
+      String studentId = emailOrId.split('@')[0];
+
       String? currentDeviceId = await _getDeviceId();
-      if (currentDeviceId == null) throw Exception("Could not verify secure device ID.");
+      if (currentDeviceId == null) {
+        throw Exception("Could not verify secure device ID.");
+      }
 
       DocumentReference userRef = _firestore.collection('users').doc(studentId);
       DocumentSnapshot userSnap = await userRef.get();
@@ -78,40 +85,49 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
           'hasConsented': false,
           'createdAt': FieldValue.serverTimestamp(),
         });
-        await _saveLoginSession(studentId, 'Student $studentId');
-        _navigateToDashboard(studentId, 'Student $studentId');
+        await _saveLoginSession(studentId, 'Student $studentId', false);
+        _navigateAfterLogin(studentId, 'Student $studentId', false);
       } else {
         // Returning Student: Verify Device Binding
         Map<String, dynamic> userData = userSnap.data() as Map<String, dynamic>;
         String? registeredDevice = userData['registeredDeviceId'];
+        final hasConsented = userData['hasConsented'] == true;
+        final studentName = userData['name'] ?? 'Student';
 
         if (registeredDevice == null) {
           await userRef.update({'registeredDeviceId': currentDeviceId});
-          await _saveLoginSession(studentId, userData['name'] ?? 'Student');
-          _navigateToDashboard(studentId, userData['name'] ?? 'Student');
+          await _saveLoginSession(studentId, studentName, hasConsented);
+          _navigateAfterLogin(studentId, studentName, hasConsented);
         } else if (registeredDevice != currentDeviceId) {
           // FRAUD DETECTED
           if (!mounted) return;
           _showSecurityAlert();
         } else {
           // Valid Login
-          await _saveLoginSession(studentId, userData['name'] ?? 'Student');
-          _navigateToDashboard(studentId, userData['name'] ?? 'Student');
+          await _saveLoginSession(studentId, studentName, hasConsented);
+          _navigateAfterLogin(studentId, studentName, hasConsented);
         }
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _saveLoginSession(String studentId, String name) async {
+  Future<void> _saveLoginSession(
+    String studentId,
+    String name,
+    bool hasConsented,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', true);
     await prefs.setString('studentId', studentId);
     await prefs.setString('studentName', name);
+    await prefs.setBool('hasConsented', hasConsented);
   }
 
   void _showSecurityAlert() {
@@ -125,16 +141,27 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
             Text('Security Alert', style: TextStyle(color: Colors.red)),
           ],
         ),
-        content: const Text('Account Proxy Detected.\n\nThis account is already registered to another physical device. You cannot log in from a different phone.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        content: const Text(
+          'Account Proxy Detected.\n\nThis account is already registered to another physical device. You cannot log in from a different phone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
 
-  void _navigateToDashboard(String id, String name) {
+  void _navigateAfterLogin(String id, String name, bool hasConsented) {
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => StudentDashboardScreen(studentId: id, studentName: name)),
+      MaterialPageRoute(
+        builder: (context) => hasConsented
+            ? StudentDashboardScreen(studentId: id, studentName: name)
+            : StudentConsentScreen(studentId: id, studentName: name),
+      ),
     );
   }
 
@@ -151,15 +178,28 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
               // Logo & Headers
               Container(
                 padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(color: _primaryGreen, shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: _primaryGreen,
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(Icons.school, color: Colors.white, size: 50),
               ),
               const SizedBox(height: 24),
-              Text('Event Track', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: _darkText)),
+              Text(
+                'Event Track',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                  color: _darkText,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text('Palawan State University', style: TextStyle(fontSize: 14, color: _primaryGreen)),
+              Text(
+                'Palawan State University',
+                style: TextStyle(fontSize: 14, color: _primaryGreen),
+              ),
               const SizedBox(height: 40),
-              
+
               // Login Card
               Container(
                 width: double.infinity,
@@ -168,49 +208,115 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(30),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 15, offset: const Offset(0, 5))
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 15,
+                      offset: const Offset(0, 5),
+                    ),
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Student Login', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _darkText)),
+                    Text(
+                      'Student Login',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
+                    ),
                     const SizedBox(height: 24),
 
                     // Email Field
-                    Text('Student Email or ID', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _darkText)),
+                    Text(
+                      'Student Email or ID',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
                         hintText: 'student@psu.palawan.edu.ph',
-                        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                        prefixIcon: Icon(Icons.mail_outline, color: Colors.grey.shade400),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _primaryGreen, width: 2)),
+                        hintStyle: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 14,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.mail_outline,
+                          color: Colors.grey.shade400,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _primaryGreen,
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 20),
 
                     // Password Field
-                    Text('Password', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _darkText)),
+                    Text(
+                      'Password',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         hintText: 'Enter your password',
-                        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                        prefixIcon: Icon(Icons.lock_outline, color: Colors.grey.shade400),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: Colors.grey.shade400),
-                          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                        hintStyle: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 14,
                         ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _primaryGreen, width: 2)),
+                        prefixIcon: Icon(
+                          Icons.lock_outline,
+                          color: Colors.grey.shade400,
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: Colors.grey.shade400,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _primaryGreen,
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -221,15 +327,34 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                       height: 54,
                       child: ElevatedButton.icon(
                         onPressed: _isLoading ? null : _handleLogin,
-                        icon: _isLoading 
-                            ? const SizedBox.shrink() 
-                            : const Icon(Icons.person_outline, color: Colors.white),
-                        label: _isLoading 
-                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : const Text('Login as Student', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        icon: _isLoading
+                            ? const SizedBox.shrink()
+                            : const Icon(
+                                Icons.person_outline,
+                                color: Colors.white,
+                              ),
+                        label: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Login as Student',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _primaryGreen,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           elevation: 0,
                         ),
                       ),
@@ -239,11 +364,17 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                     // Forgot Password
                     Center(
                       child: TextButton(
-                        onPressed: () {}, // Add password reset logic later if needed
-                        child: Text('Forgot Password?', style: TextStyle(color: _primaryGreen, fontWeight: FontWeight.w600)),
+                        onPressed:
+                            () {}, // Add password reset logic later if needed
+                        child: Text(
+                          'Forgot Password?',
+                          style: TextStyle(
+                            color: _primaryGreen,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
-
                   ],
                 ),
               ),
