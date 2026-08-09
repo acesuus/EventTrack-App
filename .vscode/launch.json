@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Admin App",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_admin.dart"
+        },
+        {
+            "name": "Student App",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_student.dart"
+        }
+    ]
+}

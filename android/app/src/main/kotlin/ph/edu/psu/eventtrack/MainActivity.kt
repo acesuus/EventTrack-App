@@ -1,4 +1,4 @@
-package com.example.event_track
+package ph.edu.psu.eventtrack
 
 import io.flutter.embedding.android.FlutterActivity
 

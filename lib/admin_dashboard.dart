@@ -1,10 +1,11 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'create_event_screen.dart';
-import 'attendance_monitoring_screen.dart';
-import 'manage_events_screen.dart';
+
 import 'admin_settings_screen.dart';
+import 'attendance_monitoring_screen.dart';
+import 'create_event_screen.dart';
+import 'manage_events_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -44,6 +45,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (confirm && mounted) {
       await FirebaseFirestore.instance.collection('events').doc(docId).delete();
+      debugPrint('Live mode: Event $docId deleted');
     }
   }
 
@@ -123,7 +125,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Admin Dashboard',
+                    'EventTrack Admin - Active',
                     style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                   ),
                   Text(
@@ -272,22 +274,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               stream: FirebaseFirestore.instance.collection('events').orderBy('startTime').snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
                 }
+
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  debugPrint('Documents found: 0');
                   return const Padding(
                     padding: EdgeInsets.all(20.0),
                     child: Center(child: Text("No active events currently.", style: TextStyle(color: Colors.grey))),
                   );
                 }
 
+                debugPrint('Documents found: ${snapshot.data!.docs.length}');
+                final events = snapshot.data!.docs;
+
                 return ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: events.length,
                   itemBuilder: (context, index) {
-                    var eventDoc = snapshot.data!.docs[index];
-                    var data = eventDoc.data() as Map<String, dynamic>;
+                    var doc = events[index];
+                    var data = doc.data() as Map<String, dynamic>;
+                    var docId = doc.id;
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -323,7 +334,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () => _deleteEvent(eventDoc.id),
+                                      onTap: () => _deleteEvent(docId),
                                       child: Icon(Icons.close, size: 18, color: Colors.grey.shade400),
                                     ),
                                   ],

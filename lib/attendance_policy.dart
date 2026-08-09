@@ -1,9 +1,25 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AttendancePolicy {
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
   static const int defaultLateCutoffMinutes = 15;
   static const int allowedOutsideSeconds = 15 * 60;
+
+  static const String eventTypeInOut = 'type1_in_out';
+  static const String eventTypeContinuous = 'type2_continuous';
+
+  static int getPointsForStatus(String status) {
+    switch (status) {
+      case 'Present':
+        return 10;
+      case 'Late':
+      case 'Partial':
+        return 5;
+      case 'Absent':
+      default:
+        return 0;
+    }
+  }
 
   static String determineInitialStatus({
     required DateTime checkInTime,
@@ -41,6 +57,7 @@ class AttendancePolicy {
 
 class AttendanceSessionRecord {
   final int schemaVersion;
+  final String eventType;
   final String initialStatus;
   final String status;
   final Timestamp? timeIn;
@@ -50,6 +67,7 @@ class AttendanceSessionRecord {
 
   const AttendanceSessionRecord({
     required this.schemaVersion,
+    required this.eventType,
     required this.initialStatus,
     required this.status,
     required this.timeIn,
@@ -61,9 +79,11 @@ class AttendanceSessionRecord {
   factory AttendanceSessionRecord.createInitial({
     required String initialStatus,
     required Timestamp startedAt,
+    String eventType = AttendancePolicy.eventTypeContinuous,
   }) {
     return AttendanceSessionRecord(
       schemaVersion: AttendancePolicy.schemaVersion,
+      eventType: eventType,
       initialStatus: initialStatus,
       status: initialStatus,
       timeIn: startedAt,
@@ -95,6 +115,7 @@ class AttendanceSessionRecord {
 
     return AttendanceSessionRecord(
       schemaVersion: (data?['schemaVersion'] as num?)?.toInt() ?? 1,
+      eventType: data?['eventType']?.toString() ?? AttendancePolicy.eventTypeContinuous,
       initialStatus: data?['initialStatus']?.toString() ?? status,
       status: status,
       timeIn: data?['timeIn'] as Timestamp?,
@@ -239,6 +260,7 @@ class AttendanceSessionRecord {
   }) {
     return {
       'schemaVersion': AttendancePolicy.schemaVersion,
+      'eventType': eventType,
       'studentId': studentId,
       'eventId': eventId,
       'eventTitle': eventTitle,
@@ -253,6 +275,7 @@ class AttendanceSessionRecord {
 
   AttendanceSessionRecord copyWith({
     int? schemaVersion,
+    String? eventType,
     String? initialStatus,
     String? status,
     Timestamp? timeIn,
@@ -262,6 +285,7 @@ class AttendanceSessionRecord {
   }) {
     return AttendanceSessionRecord(
       schemaVersion: schemaVersion ?? this.schemaVersion,
+      eventType: eventType ?? this.eventType,
       initialStatus: initialStatus ?? this.initialStatus,
       status: status ?? this.status,
       timeIn: timeIn ?? this.timeIn,
