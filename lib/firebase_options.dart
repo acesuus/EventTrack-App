@@ -16,32 +16,18 @@ import 'package:flutter/foundation.dart'
 /// ```
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
-    if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
-    }
+    if (kIsWeb) return android;
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
         return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+      return web;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
@@ -50,19 +36,48 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAJA4ijqG_Xz-qu8oChEY9iDT_ihjTBF24',
-    appId: '1:994330978958:android:8cf84c94d8ea137989f7df',
-    messagingSenderId: '994330978958',
-    projectId: 'event-track-46f63',
-    storageBucket: 'event-track-46f63.firebasestorage.app',
+    apiKey: 'AIzaSyCiYU09ALhj3jghLRoAz9m-5U6IsJg-k2E',
+    appId: '1:714028074822:android:1a304c417d916712500747',
+    messagingSenderId: '714028074822',
+    projectId: 'eventtrack-158c3',
+    storageBucket: 'eventtrack-158c3.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyAuxhApvYhTkfK-WJLir5j8Q5b1VEoepgg',
-    appId: '1:994330978958:ios:8f5f45619e0c3a5f89f7df',
-    messagingSenderId: '994330978958',
-    projectId: 'event-track-46f63',
-    storageBucket: 'event-track-46f63.firebasestorage.app',
+    apiKey: 'AIzaSyArvZZsJPSlskNY2ovC4ovF0zueHpFZ0ug',
+    appId: '1:714028074822:ios:88026d8e33150dda500747',
+    messagingSenderId: '714028074822',
+    projectId: 'eventtrack-158c3',
+    storageBucket: 'eventtrack-158c3.firebasestorage.app',
     iosBundleId: 'com.example.eventTrack',
   );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyBFh8nDoCXiiDOcg0GkBXolklJlHuflDpo',
+    appId: '1:714028074822:web:b2e24c8ff149d479500747',
+    messagingSenderId: '714028074822',
+    projectId: 'eventtrack-158c3',
+    authDomain: 'eventtrack-158c3.firebaseapp.com',
+    storageBucket: 'eventtrack-158c3.firebasestorage.app',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyArvZZsJPSlskNY2ovC4ovF0zueHpFZ0ug',
+    appId: '1:714028074822:ios:88026d8e33150dda500747',
+    messagingSenderId: '714028074822',
+    projectId: 'eventtrack-158c3',
+    storageBucket: 'eventtrack-158c3.firebasestorage.app',
+    iosBundleId: 'com.example.eventTrack',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDmFQaBsD-pm0StVr-pxio6rmls1cjYR5c',
+    appId: '1:778009533457:web:8672bd03fda0252dd125b0',
+    messagingSenderId: '778009533457',
+    projectId: 'psu-event-monitor',
+    authDomain: 'psu-event-monitor.firebaseapp.com',
+    storageBucket: 'psu-event-monitor.firebasestorage.app',
+    measurementId: 'G-QC4THHMLWB',
+  );
+
 }

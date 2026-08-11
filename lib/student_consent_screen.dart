@@ -1,7 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'student_dashboard.dart';
 
 class StudentConsentScreen extends StatefulWidget {
@@ -26,37 +28,47 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
     if (!_isAgreed) return;
 
     // 1. Check OS permissions
+    // 1. Check if location services are enabled
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled && !kIsWeb) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location services are disabled. Please enable them.')),
+      );
+      return;
+    }
+
+    // 2. Check and request permissions
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
+      // This will trigger the browser's permission pop-up on Web
       permission = await Geolocator.requestPermission();
+    }
+
+    // 3. The Web Workaround & Strict OS Checks
+    if (kIsWeb) {
+      // Proceed to next screen and let the browser/sensors handle the data
+    } else {
       if (permission == LocationPermission.denied) {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permission is required for attendance.')),
+        );
+        return;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Location permission is required for attendance.'),
+            content: Text('Location permissions are permanently denied. Please enable in settings.'),
           ),
         );
         return;
       }
     }
 
-    if (permission == LocationPermission.deniedForever) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Location permissions are permanently denied. Please enable in settings.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    // 2. Save Consent to Firestore
+    // 4. Save Consent to Firestore
     await FirebaseFirestore.instance
         .collection('users')
         .doc(widget.studentId)

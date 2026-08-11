@@ -1,9 +1,12 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'create_event_screen.dart';
-import 'attendance_monitoring_screen.dart';
+import 'package:table_calendar/table_calendar.dart';
+
 import 'admin_settings_screen.dart';
+import 'attendance_monitoring_screen.dart';
+import 'create_event_screen.dart';
+
 class ManageEventsScreen extends StatefulWidget {
   const ManageEventsScreen({super.key});
 
@@ -19,6 +22,9 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
+  DateTime _focusedDay = DateTime.now();
+  DateTime _selectedDay = DateTime.now();
+
   String _formatDate(Timestamp? timestamp) {
     if (timestamp == null) return "Unknown Date";
     return DateFormat('MMM dd, hh:mm a').format(timestamp.toDate());
@@ -30,59 +36,121 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       backgroundColor: _lightGreenBg,
       appBar: _buildAppBar(),
       body: StreamBuilder<QuerySnapshot>(
+        // REAL FIREBASE CONNECTION
         stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
+          final allEvents = snapshot.hasData ? snapshot.data!.docs : [];
 
-          final events = snapshot.data?.docs ?? [];
-          
-          if (events.isEmpty) {
-            return const Center(child: Text("No events found.", style: TextStyle(color: Colors.grey)));
-          }
+          // Filter events for the selected day
+          final filteredEvents = allEvents.where((doc) {
+            var data = doc.data() as Map<String, dynamic>;
+            if (data['startTime'] == null) return false;
+            DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+            return isSameDay(eventDate, _selectedDay);
+          }).toList();
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.check_circle_outline, color: _primaryGreen, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Active Events (${events.length})', 
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)
-                      ),
-                    ],
+            child: Column(
+              children: [
+                // Calendar Widget
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Build the list of Event Cards
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: events.length,
-                    itemBuilder: (context, index) {
-                      var eventDoc = events[index];
-                      var data = eventDoc.data() as Map<String, dynamic>;
-                      return _buildEventCard(eventDoc.id, data);
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: TableCalendar(
+                    firstDay: DateTime.utc(2020, 1, 1),
+                    lastDay: DateTime.utc(2030, 12, 31),
+                    focusedDay: _focusedDay,
+                    selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                    onDaySelected: (selectedDay, focusedDay) {
+                      setState(() {
+                        _selectedDay = selectedDay;
+                        _focusedDay = focusedDay;
+                      });
+                    },
+                    calendarStyle: CalendarStyle(
+                      selectedDecoration: BoxDecoration(
+                        color: _primaryGreen,
+                        shape: BoxShape.circle,
+                      ),
+                      todayDecoration: BoxDecoration(
+                        color: _primaryGreen.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      markerDecoration: BoxDecoration(
+                        color: _primaryGreen,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    headerStyle: const HeaderStyle(
+                      formatButtonVisible: false,
+                      titleCentered: true,
+                    ),
+                    eventLoader: (day) {
+                      return allEvents.where((doc) {
+                        var data = doc.data() as Map<String, dynamic>;
+                        if (data['startTime'] == null) return false;
+                        DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+                        return isSameDay(eventDate, day);
+                      }).toList();
                     },
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 20),
+
+                // Events List
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.check_circle_outline, color: _primaryGreen, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Events on ${DateFormat('MMM dd').format(_selectedDay)} (${filteredEvents.length})', 
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      if (filteredEvents.isEmpty)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: Text("No events on this date.", style: TextStyle(color: Colors.grey)),
+                          ),
+                        )
+                      else
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: filteredEvents.length,
+                          itemBuilder: (context, index) {
+                            var doc = filteredEvents[index];
+                            var data = doc.data() as Map<String, dynamic>;
+                            var eventId = doc.id;
+                            return _buildEventCard(eventId, data);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -102,7 +170,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       title: StreamBuilder<QuerySnapshot>(
         stream: _firestore.collection('events').snapshots(),
         builder: (context, snapshot) {
-          int count = snapshot.data?.docs.length ?? 0;
+          int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -117,7 +185,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
           padding: const EdgeInsets.only(right: 16.0, top: 8, bottom: 8),
           child: InkWell(
             onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateEventScreen()));
+              Navigator.push(context, MaterialPageRoute(builder: (context) => CreateEventScreen(preSelectedDate: _selectedDay)));
             },
             borderRadius: BorderRadius.circular(12),
             child: Container(
@@ -168,20 +236,23 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                       data['title'] ?? 'Untitled Event',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText),
                     ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        data['eventType'] == 'type1_in_out' ? 'Type 1 (In/Out)' : 'Type 2 (Continuous)',
+                        style: TextStyle(fontSize: 10, color: Colors.blue.shade700, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     _buildIconText(Icons.location_on_outlined, data['venueName'] ?? 'Unknown Venue'),
                     const SizedBox(height: 4),
                     _buildIconText(Icons.access_time, _formatDate(data['startTime'])),
-                    const SizedBox(height: 4),
-                    
-                    // Live Attendee Counter using Firestore count()
-                    FutureBuilder<AggregateQuerySnapshot>(
-                      future: _firestore.collection('attendance').where('eventId', isEqualTo: eventId).count().get(),
-                      builder: (context, snapshot) {
-                        int attendeeCount = snapshot.data?.count ?? 0;
-                        return _buildIconText(Icons.people_outline, '$attendeeCount attendees');
-                      }
-                    ),
                   ],
                 ),
               ),

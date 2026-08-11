@@ -1,6 +1,15 @@
+import 'dart:io';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:csv/csv.dart' as csv_pkg;
+import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
-import 'manage_events_screen.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
 import 'attendance_monitoring_screen.dart';
+import 'manage_events_screen.dart';
+
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
 
@@ -17,6 +26,207 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   // Toggle States
   bool _notificationsEnabled = true;
   bool _autoBackupEnabled = true;
+
+  Future<void> _importStudentCSV() async {
+    fp.FilePickerResult? result = await fp.FilePicker.platform.pickFiles(
+      type: fp.FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result != null && result.files.single.path != null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Importing students...')));
+
+      try {
+        final File file = File(result.files.single.path!);
+        final String rawCsvString = await file.readAsString();
+        final String safeCsvString = rawCsvString.replaceAll('\r\n', '\n');
+        final List<List<dynamic>> csvTable = const csv_pkg.CsvToListConverter(eol: '\n').convert(safeCsvString);
+
+        if (csvTable.length <= 1) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('CSV is empty or only contains headers.')));
+          return;
+        }
+
+        final firestore = FirebaseFirestore.instance;
+        WriteBatch batch = firestore.batch();
+        int batchCount = 0;
+        int totalImported = 0;
+
+        for (int i = 1; i < csvTable.length; i++) {
+          final row = csvTable[i];
+          if (row.isEmpty || row[0].toString().trim().isEmpty) continue;
+
+          String rawId = row[0].toString().replaceAll('-', '').replaceAll(' ', '').trim();
+          String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
+          
+          final docRef = firestore.collection('students').doc(finalId);
+          final data = {
+            'studentId': finalId,
+            'name': row.length > 1 ? row[1].toString() : '',
+            'program': row.length > 2 ? row[2].toString() : '',
+            'yearBlock': row.length > 3 ? row[3].toString() : '',
+          };
+
+          batch.set(docRef, data, SetOptions(merge: true));
+          batchCount++;
+          totalImported++;
+
+          if (batchCount == 499) {
+            await batch.commit();
+            batch = firestore.batch();
+            batchCount = 0;
+          }
+        }
+
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Successfully imported $totalImported students!')));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error importing CSV: $e')));
+        }
+      }
+    }
+  }
+
+  Future<void> _showExportDialog() async {
+    final firestore = FirebaseFirestore.instance;
+    final snapshot = await firestore.collection('events').get();
+    
+    if (snapshot.docs.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No events found.')));
+      return;
+    }
+
+    List<String> selectedEventIds = [];
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Export Event Reports'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: snapshot.docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = snapshot.docs[index];
+                    final eventId = doc.id;
+                    final title = doc['title'] ?? 'Unknown Event';
+                    final isSelected = selectedEventIds.contains(eventId);
+
+                    return CheckboxListTile(
+                      title: Text(title),
+                      value: isSelected,
+                      onChanged: (bool? value) {
+                        setState(() {
+                          if (value == true) {
+                            selectedEventIds.add(eventId);
+                          } else {
+                            selectedEventIds.remove(eventId);
+                          }
+                        });
+                      },
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: selectedEventIds.isEmpty ? null : () {
+                    Navigator.pop(context);
+                    _generateAndShareCSV(selectedEventIds);
+                  },
+                  child: const Text('Generate CSV'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  Future<void> _generateAndShareCSV(List<String> selectedEventIds) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating CSV...')));
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      
+      final studentsSnapshot = await firestore.collection('students').get();
+      Map<String, Map<String, dynamic>> studentsMap = {};
+      for (var doc in studentsSnapshot.docs) {
+        studentsMap[doc.id] = doc.data();
+      }
+
+      List<List<dynamic>> csvData = [
+        ['Event Name', 'Student ID', 'Student Name', 'Program', 'Year & Block', 'Status', 'Points', 'Time In']
+      ];
+
+      for (String eventId in selectedEventIds) {
+        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
+        
+        Map<String, dynamic> eventAttendanceMap = {};
+        for (var doc in attendanceSnapshot.docs) {
+          final attData = doc.data();
+          if (attData['studentId'] != null) {
+            eventAttendanceMap[attData['studentId']] = attData;
+          }
+        }
+
+        studentsMap.forEach((studentId, studentData) {
+          String rawId = studentId.replaceAll('-', '');
+          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
+          
+          if (attendanceRecord != null) {
+            String timeInStr = '';
+            if (attendanceRecord['timeIn'] is Timestamp) {
+              timeInStr = (attendanceRecord['timeIn'] as Timestamp).toDate().toIso8601String();
+            }
+
+            csvData.add([
+              attendanceRecord['eventName'] ?? attendanceRecord['eventTitle'] ?? 'Event',
+              studentId,
+              studentData['name'] ?? '',
+              studentData['program'] ?? '',
+              studentData['yearBlock'] ?? '',
+              attendanceRecord['status'] ?? '',
+              attendanceRecord['pointsAwarded'] ?? '',
+              timeInStr,
+            ]);
+          }
+        });
+      }
+
+      String csvOutput = const csv_pkg.ListToCsvConverter().convert(csvData);
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.csv');
+      await file.writeAsString(csvOutput);
+
+      await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating CSV: $e')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -164,6 +374,98 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
+  Future<void> _showAddStudentDialog() async {
+    final TextEditingController firstNameCtrl = TextEditingController();
+    final TextEditingController miCtrl = TextEditingController();
+    final TextEditingController lastNameCtrl = TextEditingController();
+    final TextEditingController idCtrl = TextEditingController();
+    
+    String program = 'BSCS';
+    String yearBlock = '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Add Student Manually'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: firstNameCtrl,
+                      decoration: const InputDecoration(labelText: 'First Name'),
+                    ),
+                    TextFormField(
+                      controller: miCtrl,
+                      decoration: const InputDecoration(labelText: 'Middle Initial (Optional)'),
+                    ),
+                    TextFormField(
+                      controller: lastNameCtrl,
+                      decoration: const InputDecoration(labelText: 'Last Name'),
+                    ),
+                    TextFormField(
+                      controller: idCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Student ID'),
+                    ),
+                    DropdownButtonFormField<String>(
+                      value: program,
+                      decoration: const InputDecoration(labelText: 'Program'),
+                      items: ['BSCS', 'BSIT', 'BSIS'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                      onChanged: (val) => setState(() => program = val!),
+                    ),
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Year & Block (e.g., 1-A)'),
+                      onChanged: (val) => yearBlock = val,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    String rawId = idCtrl.text.replaceAll('-', '').trim();
+                    if (rawId.isEmpty || firstNameCtrl.text.isEmpty || lastNameCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill required fields.')));
+                      return;
+                    }
+                    String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
+                    
+                    String fullName = [firstNameCtrl.text.trim(), miCtrl.text.trim(), lastNameCtrl.text.trim()]
+                        .where((s) => s.isNotEmpty)
+                        .join(' ');
+
+                    try {
+                      await FirebaseFirestore.instance.collection('students').doc(finalId).set({
+                        'studentId': finalId,
+                        'name': fullName,
+                        'program': program,
+                        'yearBlock': yearBlock,
+                      });
+                      if (!mounted) return;
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student added successfully.')));
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
   Widget _buildDataManagementCard() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -180,13 +482,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           Text('Data Management', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
           const SizedBox(height: 16),
           _buildActionButton(
-            label: 'Export All Data',
+            label: 'Export Event Reports',
             textColor: _primaryGreen,
             bgColor: _primaryGreen.withValues(alpha: 0.1),
             borderColor: _primaryGreen.withValues(alpha: 0.3),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exporting data...')));
-            },
+            onTap: _showExportDialog,
           ),
           const SizedBox(height: 12),
           _buildActionButton(
@@ -194,9 +494,15 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             textColor: Colors.blue.shade700,
             bgColor: Colors.blue.withValues(alpha: 0.1),
             borderColor: Colors.blue.withValues(alpha: 0.3),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening file picker...')));
-            },
+            onTap: _importStudentCSV,
+          ),
+          const SizedBox(height: 12),
+          _buildActionButton(
+            label: 'Add Student Manually',
+            textColor: Colors.white,
+            bgColor: _primaryGreen,
+            borderColor: _primaryGreen,
+            onTap: _showAddStudentDialog,
           ),
         ],
       ),

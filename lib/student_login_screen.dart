@@ -1,10 +1,13 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'student_dashboard.dart';
+
 import 'student_consent_screen.dart';
+import 'student_dashboard.dart';
 
 class StudentLoginScreen extends StatefulWidget {
   const StudentLoginScreen({super.key});
@@ -30,6 +33,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
 
   // 🚨 SECURITY: Fetch Hardware ID
   Future<String?> _getDeviceId() async {
+    if (kIsWeb) return 'web_test_device_id';
     var deviceInfo = DeviceInfoPlugin();
     try {
       if (Platform.isIOS) {
@@ -62,21 +66,32 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // In a real app, you would use FirebaseAuth here.
-      // For this prototype, we simulate a successful login if fields aren't empty,
-      // and use the email prefix as the "Student ID" for the database.
       String studentId = emailOrId.split('@')[0];
-
       String? currentDeviceId = await _getDeviceId();
       if (currentDeviceId == null) {
         throw Exception("Could not verify secure device ID.");
+      }
+
+      // 1. CLOUD DEVICE GATEKEEPER: Check if this phone is already owned by someone else
+      final deviceCheck = await _firestore.collection('users')
+          .where('registeredDeviceId', isEqualTo: currentDeviceId)
+          .get();
+
+      if (deviceCheck.docs.isNotEmpty) {
+        final ownerId = deviceCheck.docs.first.id;
+        if (ownerId != studentId) {
+          // BLOCK LOGIN: This physical phone belongs to a different student ID
+          if (!mounted) return;
+          _showSecurityAlert(); // Shows the "Account Proxy Detected" dialog
+          return;
+        }
       }
 
       DocumentReference userRef = _firestore.collection('users').doc(studentId);
       DocumentSnapshot userSnap = await userRef.get();
 
       if (!userSnap.exists) {
-        // First time: Register and Bind Device
+        // First time registration: Bind this device to this new account
         await userRef.set({
           'studentId': studentId,
           'email': emailOrId,
@@ -88,22 +103,23 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         await _saveLoginSession(studentId, 'Student $studentId', false);
         _navigateAfterLogin(studentId, 'Student $studentId', false);
       } else {
-        // Returning Student: Verify Device Binding
+        // Returning user check
         Map<String, dynamic> userData = userSnap.data() as Map<String, dynamic>;
         String? registeredDevice = userData['registeredDeviceId'];
         final hasConsented = userData['hasConsented'] == true;
         final studentName = userData['name'] ?? 'Student';
 
-        if (registeredDevice == null) {
+        if (registeredDevice == null || registeredDevice.isEmpty) {
+          // Claim the device if the account has no bound ID yet
           await userRef.update({'registeredDeviceId': currentDeviceId});
           await _saveLoginSession(studentId, studentName, hasConsented);
           _navigateAfterLogin(studentId, studentName, hasConsented);
         } else if (registeredDevice != currentDeviceId) {
-          // FRAUD DETECTED
+          // Block if the account is trying to log in from an unauthorized phone
           if (!mounted) return;
           _showSecurityAlert();
         } else {
-          // Valid Login
+          // Standard authorized login
           await _saveLoginSession(studentId, studentName, hasConsented);
           _navigateAfterLogin(studentId, studentName, hasConsented);
         }
@@ -133,6 +149,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
   void _showSecurityAlert() {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Row(
           children: [

@@ -1,13 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:table_calendar/table_calendar.dart';
 
 import 'attendance_policy.dart';
 import 'event_tracking_screen.dart';
+import 'geofencing_service.dart';
 import 'student_consent_screen.dart';
 import 'student_login_screen.dart';
 
@@ -36,6 +42,126 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   Timer? _clockRefreshTimer;
   bool _isSyncingAttendance = false;
 
+  bool _isOfflineMode = false;
+
+  DateTime _focusedDay = DateTime.now();
+  DateTime _selectedDay = DateTime.now();
+
+  Future<void> _syncOfflineData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final queueStr = prefs.getString('offline_attendance_queue');
+    if (queueStr == null || queueStr.isEmpty) {
+      await prefs.remove('cached_today_events');
+      return;
+    }
+
+    try {
+      final List<dynamic> queue = jsonDecode(queueStr);
+      for (final item in queue) {
+        final data = Map<String, dynamic>.from(item);
+        final String eventId = data['eventId'];
+        final String eventName = data['eventName'];
+        final String status = data['status'];
+        final int pointsAwarded = data['pointsAwarded'];
+        final String timestampStr = data['timestamp'];
+
+        final docRef = _firestore.collection('attendance').doc('${widget.studentId}_$eventId');
+        
+        await docRef.set({
+          'studentId': widget.studentId,
+          'eventId': eventId,
+          'eventName': eventName,
+          'eventTitle': eventName,
+          'status': status,
+          'pointsAwarded': pointsAwarded,
+          'timeIn': Timestamp.fromDate(DateTime.parse(timestampStr)),
+        }, SetOptions(merge: true));
+      }
+
+      await prefs.remove('offline_attendance_queue');
+      await prefs.remove('cached_today_events');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Offline records successfully synced.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sync failed. Please check your internet connection and try again.')),
+        );
+        setState(() => _isOfflineMode = true);
+      }
+    }
+  }
+
+  Future<void> _toggleOfflineMode(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value) {
+      try {
+        final now = DateTime.now();
+        final startOfDay = DateTime(now.year, now.month, now.day);
+        final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+
+        final snapshot = await _firestore
+            .collection('events')
+            .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+            .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+            .get(const GetOptions(source: Source.server));
+
+        List<Map<String, dynamic>> sanitizedEvents = [];
+        for (var doc in snapshot.docs) {
+          final data = doc.data();
+          data['id'] = doc.id;
+          
+          if (data['startTime'] is Timestamp) {
+            data['startTime'] = (data['startTime'] as Timestamp).toDate().toIso8601String();
+          }
+          if (data['endTime'] is Timestamp) {
+            data['endTime'] = (data['endTime'] as Timestamp).toDate().toIso8601String();
+          }
+          if (data['createdAt'] is Timestamp) {
+            data['createdAt'] = (data['createdAt'] as Timestamp).toDate().toIso8601String();
+          }
+          
+          if (data['polygonPoints'] is List) {
+            final points = data['polygonPoints'] as List<dynamic>;
+            final sanitizedPoints = points.map((p) {
+              if (p is GeoPoint) {
+                return {'lat': p.latitude, 'lng': p.longitude};
+              }
+              return p;
+            }).toList();
+            data['polygonPoints'] = sanitizedPoints;
+          }
+
+          sanitizedEvents.add(data);
+        }
+
+        await prefs.setString('cached_today_events', jsonEncode(sanitizedEvents));
+
+      } catch (e) {
+        debugPrint("Pre-load fetch failed: $e");
+      }
+      await _firestore.disableNetwork();
+      setState(() => _isOfflineMode = true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Data pre-loaded. App is now in Offline Mode."))
+        );
+      }
+    } else {
+      await _firestore.enableNetwork();
+      await _syncOfflineData();
+      setState(() => _isOfflineMode = false);
+      if (mounted && !_isOfflineMode) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("App is Online. Attendance synced."))
+        );
+      }
+    }
+  }
   @override
   void initState() {
     super.initState();
@@ -154,7 +280,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       return false;
     }
 
-    await attendanceRef.set(
+    // FIX APPLIED HERE: Removed 'await' to allow offline fire-and-forget
+    attendanceRef.set(
       record.toFirestoreFields(
         studentId: widget.studentId,
         eventId: attendanceData['eventId']?.toString() ?? '',
@@ -167,6 +294,78 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
 
     return true;
+  }
+
+  Future<String> _getHardwareFingerprint() async {
+    if (kIsWeb) return 'web_browser_device';
+    final deviceInfo = DeviceInfoPlugin();
+    if (Platform.isAndroid) {
+      final androidInfo = await deviceInfo.androidInfo;
+      return androidInfo.id;
+    } else if (Platform.isIOS) {
+      final iosInfo = await deviceInfo.iosInfo;
+      return iosInfo.identifierForVendor ?? 'unknown_ios_id';
+    }
+    throw UnsupportedError('Unsupported platform for device binding');
+  }
+
+  Future<void> _enforceDeviceBinding(String studentId) async {
+    final fingerprint = await _getHardwareFingerprint();
+    final userDocRef = _firestore.collection('users').doc(studentId);
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1. LOCAL BINDING (Anti-Clear Data protection for Offline Mode)
+    final localBoundId = prefs.getString('bound_student_id');
+    if (localBoundId != null && localBoundId != studentId) {
+      throw Exception('SECURITY_VIOLATION: This phone is permanently bound to Student ID: $localBoundId. Multiple accounts on one device are prohibited.');
+    }
+
+    // 2. CLOUD BINDING (Cross-references Firestore to stop 1-device-to-many-accounts)
+    DocumentSnapshot<Map<String, dynamic>>? userDoc;
+    try {
+      userDoc = await userDocRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
+    } catch (e) {
+      if (_isOfflineMode) return; // Rely on the localBoundId check above if offline
+      rethrow;
+    }
+
+    // Helper function to claim the device in the cloud
+    Future<void> claimDevice() async {
+      if (_isOfflineMode) return; // Cannot claim a new device while offline
+      
+      // Cloud Gatekeeper: Check if this physical phone is already owned by someone else!
+      final deviceCheck = await _firestore.collection('users')
+          .where('registeredDeviceId', isEqualTo: fingerprint)
+          .get(const GetOptions(source: Source.server));
+
+      if (deviceCheck.docs.isNotEmpty) {
+        final ownerId = deviceCheck.docs.first.id;
+        if (ownerId != studentId) {
+          throw Exception('SECURITY_VIOLATION: This physical phone is already permanently bound to Student ID: $ownerId. Proxy attendance is strictly prohibited.');
+        }
+      }
+      
+      // If clear, claim the device in the cloud and locally
+      await userDocRef.set({'registeredDeviceId': fingerprint}, SetOptions(merge: true));
+      await prefs.setString('bound_student_id', studentId);
+    }
+
+    if (!userDoc.exists) {
+      await claimDevice();
+      return;
+    }
+
+    final userData = userDoc.data()!;
+    final cloudDeviceId = userData['registeredDeviceId'];
+
+    if (cloudDeviceId == null || cloudDeviceId.toString().isEmpty) {
+      await claimDevice();
+    } else if (cloudDeviceId != fingerprint) {
+      throw Exception('SECURITY_VIOLATION: Identity mismatch. Your account is bound to a different physical device.');
+    } else {
+      // Success: Re-sync local storage in case they managed to clear app data but still passed the cloud check
+      await prefs.setString('bound_student_id', studentId);
+    }
   }
 
   Future<void> _joinEventWithOSPermission(
@@ -213,9 +412,15 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     }
 
     final attendanceRef = _attendanceRefForEvent(eventId);
-    final existingAttendance = await attendanceRef.get();
+    DocumentSnapshot<Map<String, dynamic>>? existingAttendance;
 
-    if (existingAttendance.exists) {
+    try {
+      existingAttendance = await attendanceRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
+    } catch (e) {
+      existingAttendance = null;
+    }
+
+    if (existingAttendance != null && existingAttendance.exists) {
       final attendanceData = existingAttendance.data() ?? <String, dynamic>{};
       await _normalizeAttendanceRecord(
         attendanceRef: attendanceRef,
@@ -223,7 +428,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         eventData: data,
         now: DateTime.now(),
       );
-      final refreshedAttendance = await attendanceRef.get();
+      final refreshedAttendance = await attendanceRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
       final refreshedData = refreshedAttendance.data() ?? attendanceData;
       final existingRecord = AttendanceSessionRecord.fromFirestore(
         refreshedData,
@@ -242,6 +447,32 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         );
         return;
       }
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Verifying your device and location...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    try {
+      await _enforceDeviceBinding(widget.studentId);
+      // Fetch current position to ensure the GPS sensor is active
+      await Geolocator.getCurrentPosition();
+    } catch (e) {
+      if (!mounted) return;
+      
+      final errorMessage = e.toString();
+      final displayMessage = errorMessage.contains('SECURITY_VIOLATION') 
+          ? errorMessage.replaceAll('Exception: ', '') 
+          : 'Failed to verify location. Please ensure GPS is enabled.';
+          
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(displayMessage)),
+      );
+      return;
     }
 
     if (!mounted) return;
@@ -427,13 +658,130 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   Widget _buildSelectedTab() {
     switch (_selectedIndex) {
       case 1:
-        return _buildHistoryTab();
+        return _buildCalendarTab();
       case 2:
+        return _buildHistoryTab();
+      case 3:
         return _buildSettingsTab();
       case 0:
       default:
         return _buildHomeTab();
     }
+  }
+
+  Widget _buildCalendarTab() {
+    return Column(
+      children: [
+        _buildPageHeader(
+          title: 'Event Calendar',
+          subtitle: 'Browse scheduled events by date',
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _firestore.collection('events').orderBy('startTime').snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              final allEvents = snapshot.hasData ? snapshot.data!.docs : [];
+
+              final filteredEvents = allEvents.where((doc) {
+                var data = doc.data() as Map<String, dynamic>;
+                if (data['startTime'] == null) return false;
+                DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+                return isSameDay(eventDate, _selectedDay);
+              }).toList();
+
+              return Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: TableCalendar(
+                      firstDay: DateTime.utc(2020, 1, 1),
+                      lastDay: DateTime.utc(2030, 12, 31),
+                      focusedDay: _focusedDay,
+                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                      calendarFormat: CalendarFormat.month,
+                      availableCalendarFormats: const {
+                        CalendarFormat.month: 'Month',
+                      },
+                      onDaySelected: (selectedDay, focusedDay) {
+                        setState(() {
+                          _selectedDay = selectedDay;
+                          _focusedDay = focusedDay;
+                        });
+                      },
+                      calendarStyle: CalendarStyle(
+                        selectedDecoration: BoxDecoration(
+                          color: _primaryGreen,
+                          shape: BoxShape.circle,
+                        ),
+                        todayDecoration: BoxDecoration(
+                          color: _primaryGreen.withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                        ),
+                        markerDecoration: BoxDecoration(
+                          color: _primaryGreen,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      headerStyle: const HeaderStyle(
+                        formatButtonVisible: false,
+                        titleCentered: true,
+                        leftChevronVisible: true,
+                        rightChevronVisible: true,
+                      ),
+                      eventLoader: (day) {
+                        return allEvents.where((doc) {
+                          var data = doc.data() as Map<String, dynamic>;
+                          if (data['startTime'] == null) return false;
+                          DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+                          return isSameDay(eventDate, day);
+                        }).toList();
+                      },
+                    ),
+                  ),
+                  Expanded(
+                    child: filteredEvents.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No events scheduled for this date.',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            itemCount: filteredEvents.length,
+                            itemBuilder: (context, index) {
+                              final doc = filteredEvents[index];
+                              final data = doc.data() as Map<String, dynamic>;
+                              final windowInfo = _getEventWindowInfo(data, DateTime.now());
+                              return _buildEventCard(
+                                doc.id,
+                                data,
+                                windowInfo,
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildHomeTab() {
@@ -443,6 +791,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           child: Column(
             children: [
               _buildHomeHeader(),
+              const SizedBox(height: 20),
+              _buildPointsCard(),
               const SizedBox(height: 20),
               _buildEventsSection(),
               const SizedBox(height: 20),
@@ -455,12 +805,92 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
+  Widget _buildPointsCard() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('attendance')
+          .where('studentId', isEqualTo: widget.studentId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        int totalPoints = 0;
+        if (snapshot.hasData) {
+          for (var doc in snapshot.data!.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final status = data['status']?.toString() ?? 'Absent';
+            final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+            totalPoints += (pts as num).toInt();
+          }
+        }
+        
+        return InkWell(
+          onTap: () => setState(() { _selectedIndex = 2; }),
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [_primaryGreen, Colors.green.shade700],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: _primaryGreen.withValues(alpha: 0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(
+                    color: Colors.white24,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.stars, color: Colors.white, size: 30),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'CS Association Points',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$totalPoints pts',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Tap to view breakdown ->',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildHistoryTab() {
     return Column(
       children: [
         _buildPageHeader(
-          title: 'My Attendance',
-          subtitle: 'Review your past event check-ins',
+          title: 'Event Attendance & Points Ledger',
+          subtitle: 'Review your past event check-ins and points earned',
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
@@ -469,24 +899,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 .where('studentId', isEqualTo: widget.studentId)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              final records = snapshot.data!.docs.toList();
-              records.sort((a, b) {
-                final aData = a.data() as Map<String, dynamic>;
-                final bData = b.data() as Map<String, dynamic>;
-                final aTime =
-                    (aData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ??
-                    0;
-                final bTime =
-                    (bData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ??
-                    0;
-                return bTime.compareTo(aTime);
-              });
-
-              if (records.isEmpty) {
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return _buildEmptyState(
                   icon: Icons.history,
                   title: 'No attendance records yet',
@@ -494,13 +911,84 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 );
               }
 
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-                itemCount: records.length,
-                itemBuilder: (context, index) {
-                  final data = records[index].data() as Map<String, dynamic>;
-                  return _buildHistoryCard(data);
-                },
+              final records = snapshot.data!.docs.toList();
+              records.sort((a, b) {
+                final aData = a.data() as Map<String, dynamic>;
+                final bData = b.data() as Map<String, dynamic>;
+                final aTime = (aData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+                final bTime = (bData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+                return bTime.compareTo(aTime);
+              });
+
+              int totalPoints = 0;
+              for (var doc in records) {
+                final data = doc.data() as Map<String, dynamic>;
+                final status = data['status']?.toString() ?? 'Absent';
+                final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+                totalPoints += (pts as num).toInt();
+              }
+
+              return Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Total Points to Date',
+                          style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$totalPoints pts',
+                          style: TextStyle(
+                            color: _primaryGreen,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: MediaQuery.of(context).size.width > 600 ? MediaQuery.of(context).size.width : 600,
+                        child: PaginatedDataTable(
+                          headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                          dataRowMaxHeight: 60,
+                          columns: const [
+                            DataColumn(label: Text('Event Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text('Event Type', style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text('Date & Time', style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold))),
+                            DataColumn(label: Text('Points', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                          ],
+                          source: _AttendanceDataSource(records),
+                          rowsPerPage: 5,
+                          availableRowsPerPage: const [5],
+                          showFirstLastButtons: true,
+                          columnSpacing: 20.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -671,14 +1159,28 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
             ],
           ),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               IconButton(
+                icon: Icon(
+                  _isOfflineMode ? Icons.cloud_off : Icons.cloud_done,
+                  color: _isOfflineMode ? Colors.orange.shade300 : Colors.white,
+                ),
+                onPressed: () => _toggleOfflineMode(!_isOfflineMode),
+                tooltip: _isOfflineMode ? 'Go Online' : 'Go Offline',
+              ),
+              const SizedBox(width: 8),
+              IconButton(
                 icon: const Icon(Icons.settings_outlined, color: Colors.white),
-                onPressed: () => setState(() => _selectedIndex = 2),
+                onPressed: () => setState(() => _selectedIndex = 3),
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
               ),
               IconButton(
                 icon: const Icon(Icons.logout, color: Colors.white),
                 onPressed: _handleLogout,
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
               ),
             ],
           ),
@@ -723,15 +1225,25 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('events').orderBy('startTime').snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(20.0),
+              child: CircularProgressIndicator(),
+            ),
+          );
         }
 
-        if (snapshot.data!.docs.isEmpty) {
+        final allEvents = snapshot.hasData ? snapshot.data!.docs : [];
+
+        if (allEvents.isEmpty) {
           return const Center(
-            child: Text(
-              'No events currently.',
-              style: TextStyle(color: Colors.grey),
+            child: Padding(
+              padding: EdgeInsets.all(20.0),
+              child: Text(
+                'No active events at PSU Main Campus',
+                style: TextStyle(color: Colors.grey),
+              ),
             ),
           );
         }
@@ -740,8 +1252,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         final activeEvents = <Map<String, dynamic>>[];
         final upcomingEvents = <Map<String, dynamic>>[];
 
-        for (final doc in snapshot.data!.docs) {
+        for (final doc in allEvents) {
           final data = doc.data() as Map<String, dynamic>;
+          if (data['startTime'] == null) continue;
+          
           final windowInfo = _getEventWindowInfo(data, now);
           final phase = windowInfo['phase'];
 
@@ -762,9 +1276,12 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
         if (activeEvents.isEmpty && upcomingEvents.isEmpty) {
           return const Center(
-            child: Text(
-              'No upcoming or active events.',
-              style: TextStyle(color: Colors.grey),
+            child: Padding(
+              padding: EdgeInsets.all(20.0),
+              child: Text(
+                'No upcoming or active events.',
+                style: TextStyle(color: Colors.grey),
+              ),
             ),
           );
         }
@@ -1188,118 +1705,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               style: TextStyle(fontSize: 12),
             ),
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () => setState(() => _selectedIndex = 1),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryCard(Map<String, dynamic> data) {
-    final status = data['status']?.toString() ?? 'Unknown';
-    final displayStatus = _displayAttendanceStatus(status);
-    final style = _getAttendanceStatusStyle(status);
-    final totalOutsideSeconds =
-        (data['totalOutsideSeconds'] as num?)?.toInt() ?? 0;
-    final hasSessionData = data['sessions'] is List<dynamic>;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  data['eventTitle']?.toString() ?? 'Unknown Event',
-                  style: TextStyle(
-                    color: _darkText,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: style['bg'] as Color,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      style['icon'] as IconData,
-                      size: 14,
-                      color: style['color'] as Color,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      displayStatus,
-                      style: TextStyle(
-                        color: style['color'] as Color,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildHistoryRow(
-            'Checked In',
-            _formatDateTime(data['timeIn'] as Timestamp?),
-          ),
-          _buildHistoryRow(
-            'Finished',
-            _formatDateTime(data['timeOut'] as Timestamp?),
-          ),
-          if (hasSessionData)
-            _buildHistoryRow('Returned', _formatReturnCountFromRecord(data)),
-          if (hasSessionData)
-            _buildHistoryRow('Time Away', _formatDuration(totalOutsideSeconds)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 72,
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(color: _darkText, fontSize: 13),
-            ),
+            onTap: () => setState(() => _selectedIndex = 2),
           ),
         ],
       ),
@@ -1464,6 +1870,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           activeIcon: Icon(Icons.home),
           label: 'Home',
         ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_month_outlined),
+          activeIcon: Icon(Icons.calendar_month),
+          label: 'Calendar',
+        ),
         BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
         BottomNavigationBarItem(
           icon: Icon(Icons.settings_outlined),
@@ -1472,4 +1883,57 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       ],
     );
   }
+}
+
+class _AttendanceDataSource extends DataTableSource {
+  final List<QueryDocumentSnapshot> docs;
+
+  _AttendanceDataSource(this.docs);
+
+  @override
+  DataRow? getRow(int index) {
+    if (index >= docs.length) return null;
+    
+    final doc = docs[index];
+    final data = doc.data() as Map<String, dynamic>;
+    final eventName = data['eventName'] ?? data['eventTitle'] ?? 'Legacy Event';
+    
+    String eventTypeStr = 'Standard';
+    final type = data['eventType'];
+    if (type == 'type1_in_out') {
+      eventTypeStr = 'Time In/Out';
+    } else if (type == 'type2_continuous') {
+      eventTypeStr = 'Continuous';
+    }
+    
+    final timeIn = data['timeIn'] as Timestamp?;
+    final dateStr = timeIn != null ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate()) : 'Unknown';
+    
+    final status = data['status']?.toString() ?? 'Absent';
+    Color statusColor = Colors.red;
+    if (status == 'Present') {
+      statusColor = Colors.green;
+    } else if (status == 'Late' || status == 'Partial') {
+      statusColor = Colors.orange;
+    }
+    
+    final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+    
+    return DataRow(cells: [
+      DataCell(Text(eventName)),
+      DataCell(Text(eventTypeStr)),
+      DataCell(Text(dateStr)),
+      DataCell(Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold))),
+      DataCell(Text('+$pts pts', style: const TextStyle(fontWeight: FontWeight.bold))),
+    ]);
+  }
+
+  @override
+  bool get isRowCountApproximate => false;
+
+  @override
+  int get rowCount => docs.length;
+
+  @override
+  int get selectedRowCount => 0;
 }

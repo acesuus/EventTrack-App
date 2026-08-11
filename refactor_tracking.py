@@ -1,5 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
+import sys
+
+new_content = """import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'attendance_policy.dart';
 import 'geofencing_service.dart';
@@ -129,27 +129,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     }
 
     try {
-      Position? pos;
-      try {
-        pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (e) {
-        pos = await Geolocator.getLastKnownPosition();
-      }
-      
-      if (pos == null) {
-        if (!mounted) return;
-        setState(() {
-          _isCheckingLocation = false;
-          _locationError = 'Weak GPS signal. Please step near a window or go outside.';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Weak GPS signal. Please step near a window or go outside.')),
-        );
-        return;
-      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: _buildLocationSettings(),
+      );
 
       final distanceInMeters = Geolocator.distanceBetween(
         pos.latitude,
@@ -187,7 +169,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                 ],
               ),
               content: const Text(
-                'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\n\nPlease disable the spoofer and rejoin the event.',
+                'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\\n\\nPlease disable the spoofer and rejoin the event.',
               ),
               actions: [
                 TextButton(
@@ -202,76 +184,6 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
           );
         }
         return;
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      final isOffline = prefs.containsKey('cached_today_events');
-
-      if (isOffline) {
-        if (!currentlyInside) {
-          setState(() {
-            _currentPosition = pos;
-            _distanceToVenueMeters = distanceInMeters;
-            _isInside = false;
-            _isCheckingLocation = false;
-            _locationError = null;
-            _currentStatus = 'Outside Event Area';
-          });
-          return;
-        } else {
-          final queueStr = prefs.getString('offline_attendance_queue');
-          List<dynamic> queue = queueStr != null ? jsonDecode(queueStr) : [];
-          
-          bool isDuplicate = queue.any((item) => item['eventId'] == widget.eventId);
-          if (isDuplicate) {
-            setState(() {
-              _currentPosition = pos;
-              _distanceToVenueMeters = distanceInMeters;
-              _isInside = true;
-              _isCheckingLocation = false;
-              _locationError = null;
-              _currentStatus = 'Inside Event Area';
-            });
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Attendance already recorded locally. Sync required.')),
-              );
-            }
-            return;
-          }
-
-          final int basePoints = int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
-          
-          final newRecord = {
-            'eventId': widget.eventId,
-            'eventName': widget.eventData['title'] ?? 'Unknown Event',
-            'status': 'Present',
-            'pointsAwarded': basePoints,
-            'timestamp': DateTime.now().toIso8601String(),
-          };
-          
-          queue.add(newRecord);
-          await prefs.setString('offline_attendance_queue', jsonEncode(queue));
-          
-          setState(() {
-            _currentPosition = pos;
-            _distanceToVenueMeters = distanceInMeters;
-            _isInside = true;
-            _isCheckingLocation = false;
-            _locationError = null;
-            _currentStatus = 'Inside Event Area';
-            _attendanceStatus = 'Present';
-            _timeIn = Timestamp.now();
-            _attendanceFinalized = false;
-          });
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Attendance recorded locally. Sync required.')),
-            );
-          }
-          return;
-        }
       }
 
       final now = Timestamp.now();
@@ -394,23 +306,10 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     }
 
     if (updated) {
-      final int basePoints = int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
-      String finalStatus = data['status'] as String? ?? 'Present';
-      int pointsAwarded = 0;
-      if (finalStatus == 'Present') {
-        pointsAwarded = basePoints;
-      } else if (finalStatus == 'Late' || finalStatus == 'Partial') {
-        pointsAwarded = (basePoints / 2).round();
-      } else {
-        pointsAwarded = 0;
-      }
-
       data['studentId'] = widget.studentId;
       data['eventId'] = widget.eventId;
       data['eventTitle'] = _eventTitle;
       data['eventType'] = _eventType;
-      data['eventName'] = widget.eventData['title'] ?? 'Unknown Event';
-      data['pointsAwarded'] = pointsAwarded;
       await _attendanceRef.set(data, SetOptions(merge: true));
     }
     
@@ -943,3 +842,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     );
   }
 }
+"""
+
+with open('lib/event_tracking_screen.dart', 'w', encoding='utf-8') as f:
+    f.write(new_content)
+
+print("SUCCESS")
