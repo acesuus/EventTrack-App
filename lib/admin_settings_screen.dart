@@ -5,6 +5,8 @@ import 'package:csv/csv.dart' as csv_pkg;
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import 'attendance_monitoring_screen.dart';
@@ -154,6 +156,17 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                   },
                   child: const Text('Generate CSV'),
                 ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryGreen,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: selectedEventIds.isEmpty ? null : () {
+                    Navigator.pop(context);
+                    _generateAndSharePDF(selectedEventIds);
+                  },
+                  child: const Text('Generate PDF'),
+                ),
               ],
             );
           }
@@ -224,6 +237,99 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating CSV: $e')));
+      }
+    }
+  }
+
+  Future<void> _generateAndSharePDF(List<String> selectedEventIds) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF...')));
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      
+      final studentsSnapshot = await firestore.collection('students').get();
+      Map<String, Map<String, dynamic>> studentsMap = {};
+      for (var doc in studentsSnapshot.docs) {
+        studentsMap[doc.id] = doc.data();
+      }
+
+      final pdf = pw.Document();
+
+      for (String eventId in selectedEventIds) {
+        final eventDoc = await firestore.collection('events').doc(eventId).get();
+        final eventName = eventDoc.data()?['title'] ?? 'Event';
+        
+        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
+        
+        Map<String, dynamic> eventAttendanceMap = {};
+        for (var doc in attendanceSnapshot.docs) {
+          final attData = doc.data();
+          if (attData['studentId'] != null) {
+            eventAttendanceMap[attData['studentId']] = attData;
+          }
+        }
+
+        List<List<String>> tableData = [
+          ['Student ID', 'Name', 'Program', 'Year/Block', 'Status', 'Points', 'Time In']
+        ];
+
+        studentsMap.forEach((studentId, studentData) {
+          String rawId = studentId.replaceAll('-', '');
+          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
+          
+          if (attendanceRecord != null) {
+            String timeInStr = '';
+            if (attendanceRecord['timeIn'] is Timestamp) {
+              final date = (attendanceRecord['timeIn'] as Timestamp).toDate();
+              timeInStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+            }
+
+            tableData.add([
+              studentId,
+              studentData['name']?.toString() ?? '',
+              studentData['program']?.toString() ?? '',
+              studentData['yearBlock']?.toString() ?? '',
+              attendanceRecord['status']?.toString() ?? '',
+              attendanceRecord['pointsAwarded']?.toString() ?? '',
+              timeInStr,
+            ]);
+          }
+        });
+
+        pdf.addPage(
+          pw.MultiPage(
+            pageFormat: PdfPageFormat.a4,
+            margin: const pw.EdgeInsets.all(32),
+            build: (pw.Context context) {
+              return [
+                pw.Header(
+                  level: 0,
+                  child: pw.Text('Attendance Report: $eventName', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                ),
+                pw.SizedBox(height: 10),
+                pw.TableHelper.fromTextArray(
+                  context: context,
+                  data: tableData,
+                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                  headerDecoration: const pw.BoxDecoration(color: PdfColors.green800),
+                  cellAlignment: pw.Alignment.centerLeft,
+                  cellPadding: const pw.EdgeInsets.all(5),
+                ),
+              ];
+            },
+          ),
+        );
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      await file.writeAsBytes(await pdf.save());
+
+      await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report (PDF)');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
       }
     }
   }
