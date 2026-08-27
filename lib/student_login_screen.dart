@@ -75,7 +75,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       // 1. CLOUD DEVICE GATEKEEPER: Check if this phone is already owned by someone else
       final deviceCheck = await _firestore.collection('users')
           .where('registeredDeviceId', isEqualTo: currentDeviceId)
-          .get();
+          .get(const GetOptions(source: Source.server));
 
       if (deviceCheck.docs.isNotEmpty) {
         final ownerId = deviceCheck.docs.first.id;
@@ -88,7 +88,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       }
 
       DocumentReference userRef = _firestore.collection('users').doc(studentId);
-      DocumentSnapshot userSnap = await userRef.get();
+      DocumentSnapshot userSnap = await userRef.get(const GetOptions(source: Source.server));
 
       if (!userSnap.exists) {
         // First time registration: Bind this device to this new account
@@ -126,9 +126,27 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      
+      String cleanMessage = 'An unexpected error occurred. Please try again.';
+      final errorStr = e.toString();
+
+      if (errorStr.contains('SECURITY_VIOLATION')) {
+        cleanMessage = errorStr.replaceAll('Exception: ', '');
+      } else if (errorStr.contains('network-request-failed') || errorStr.contains('SocketException') || errorStr.contains('unavailable')) {
+        cleanMessage = 'Network error. Please check your internet connection.';
+      } else if (errorStr.contains('user-not-found') || errorStr.contains('wrong-password') || errorStr.contains('INVALID_LOGIN')) {
+        cleanMessage = 'Invalid student credentials. Please verify your ID.';
+      } else {
+        cleanMessage = 'Login failed. Please try again later.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(cleanMessage),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

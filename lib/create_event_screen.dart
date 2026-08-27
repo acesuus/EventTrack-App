@@ -33,6 +33,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   String _venueAddress = "";
   int _lateCutoff = 15;
   String _eventType = AttendancePolicy.eventTypeContinuous;
+  String _continuousRequirement = 'Both (Time In & Out)';
+  String _morningRequirement = 'Both (Time In & Out)';
+  String _afternoonRequirement = 'Both (Time In & Out)';
   final TextEditingController _pointsController = TextEditingController(text: '10');
   
   // Geofence Data
@@ -82,6 +85,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         _endTime = TimeOfDay.fromDateTime(end);
       }
       _eventType = data['eventType'] ?? AttendancePolicy.eventTypeContinuous;
+      _continuousRequirement = data['continuousRequirement'] ?? data['attendanceRequirement'] ?? 'Both (Time In & Out)';
+      _morningRequirement = data['morningRequirement'] ?? 'Both (Time In & Out)';
+      _afternoonRequirement = data['afternoonRequirement'] ?? 'Both (Time In & Out)';
     } else if (!_isEditing && widget.preSelectedDate != null) {
       _startDate = widget.preSelectedDate;
       _endDate = widget.preSelectedDate;
@@ -185,20 +191,38 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   // Save/Update logic
   Future<void> _saveEvent() async {
     if (_eventType == AttendancePolicy.eventTypeInOut || _eventType == 'type1_in_out') {
-      if (_eventName.isEmpty || _venueName.isEmpty || _selectedLocation == null ||
-          _singleEventDate == null || _morningIn == null || _morningOut == null ||
-          _afternoonIn == null || _afternoonOut == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please fill all required fields (*)!')),
-        );
+      if (_eventName.isEmpty || _venueName.isEmpty || _selectedLocation == null || _singleEventDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all required fields (*)!')));
+        return;
+      }
+      if ((_morningRequirement == 'Both (Time In & Out)' || _morningRequirement == 'Time In Only') && _morningIn == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify Morning Time In!')));
+        return;
+      }
+      if ((_morningRequirement == 'Both (Time In & Out)' || _morningRequirement == 'Time Out Only') && _morningOut == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify Morning Time Out!')));
+        return;
+      }
+      if ((_afternoonRequirement == 'Both (Time In & Out)' || _afternoonRequirement == 'Time In Only') && _afternoonIn == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify Afternoon Time In!')));
+        return;
+      }
+      if ((_afternoonRequirement == 'Both (Time In & Out)' || _afternoonRequirement == 'Time Out Only') && _afternoonOut == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify Afternoon Time Out!')));
         return;
       }
     } else {
-      if (_eventName.isEmpty || _venueName.isEmpty || _selectedLocation == null || 
-          _startDate == null || _startTime == null || _endDate == null || _endTime == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please fill all required fields (*)!')),
-        );
+      if (_eventName.isEmpty || _venueName.isEmpty || _selectedLocation == null || _startDate == null || _endDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all required fields (*)!')));
+        return;
+      }
+      if ((_continuousRequirement == 'Both (Time In & Out)' || _continuousRequirement == 'Time In Only') && _startTime == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify Start Time!')));
+        return;
+      }
+      // Assuming we always need End Time to know when event officially closes, even if Time In Only.
+      if (_endTime == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please specify End Time!')));
         return;
       }
     }
@@ -259,23 +283,41 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     };
 
     if (_eventType == AttendancePolicy.eventTypeInOut || _eventType == 'type1_in_out') {
-      final mIn = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _morningIn!.hour, _morningIn!.minute);
-      final mOut = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _morningOut!.hour, _morningOut!.minute);
-      final aIn = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonIn!.hour, _afternoonIn!.minute);
-      final aOut = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonOut!.hour, _afternoonOut!.minute);
-
-      eventPayload['morningStartTime'] = Timestamp.fromDate(mIn);
-      eventPayload['morningEndTime'] = Timestamp.fromDate(mOut);
-      eventPayload['afternoonStartTime'] = Timestamp.fromDate(aIn);
-      eventPayload['afternoonEndTime'] = Timestamp.fromDate(aOut);
+      eventPayload['morningRequirement'] = _morningRequirement;
+      eventPayload['afternoonRequirement'] = _afternoonRequirement;
       
-      eventPayload['startTime'] = Timestamp.fromDate(mIn);
-      eventPayload['endTime'] = Timestamp.fromDate(aOut);
+      Timestamp? mInTs, mOutTs, aInTs, aOutTs;
+      
+      if (_morningIn != null) {
+        mInTs = Timestamp.fromDate(DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _morningIn!.hour, _morningIn!.minute));
+        eventPayload['morningStartTime'] = mInTs;
+      }
+      if (_morningOut != null) {
+        mOutTs = Timestamp.fromDate(DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _morningOut!.hour, _morningOut!.minute));
+        eventPayload['morningEndTime'] = mOutTs;
+      }
+      if (_afternoonIn != null) {
+        aInTs = Timestamp.fromDate(DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonIn!.hour, _afternoonIn!.minute));
+        eventPayload['afternoonStartTime'] = aInTs;
+      }
+      if (_afternoonOut != null) {
+        aOutTs = Timestamp.fromDate(DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonOut!.hour, _afternoonOut!.minute));
+        eventPayload['afternoonEndTime'] = aOutTs;
+      }
+
+      eventPayload['startTime'] = mInTs ?? mOutTs ?? aInTs ?? aOutTs;
+      eventPayload['endTime'] = aOutTs ?? aInTs ?? mOutTs ?? mInTs;
     } else {
-      final startDateTime = DateTime(_startDate!.year, _startDate!.month, _startDate!.day, _startTime!.hour, _startTime!.minute);
-      final endDateTime = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, _endTime!.hour, _endTime!.minute);
-      eventPayload['startTime'] = Timestamp.fromDate(startDateTime);
-      eventPayload['endTime'] = Timestamp.fromDate(endDateTime);
+      eventPayload['continuousRequirement'] = _continuousRequirement;
+      
+      if (_startTime != null) {
+        final startDateTime = DateTime(_startDate!.year, _startDate!.month, _startDate!.day, _startTime!.hour, _startTime!.minute);
+        eventPayload['startTime'] = Timestamp.fromDate(startDateTime);
+      }
+      if (_endTime != null) {
+        final endDateTime = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, _endTime!.hour, _endTime!.minute);
+        eventPayload['endTime'] = Timestamp.fromDate(endDateTime);
+      }
     }
 
     try {
@@ -543,17 +585,41 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
+  Widget _buildRequirementDropdown(String value, Function(String?) onChanged) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: true,
+          value: value,
+          items: const [
+            DropdownMenuItem(value: 'Both (Time In & Out)', child: Text('Requirement: Both (Time In & Out)', style: TextStyle(fontSize: 13))),
+            DropdownMenuItem(value: 'Time In Only', child: Text('Requirement: Time In Only', style: TextStyle(fontSize: 13))),
+            DropdownMenuItem(value: 'Time Out Only', child: Text('Requirement: Time Out Only', style: TextStyle(fontSize: 13))),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+
   Widget _buildDateTimeCard() {
     return _buildCard(
       title: 'Date & Time',
       icon: Icons.access_time,
       children: [
         if (_eventType == AttendancePolicy.eventTypeContinuous || _eventType == 'type2_continuous') ...[
+          _buildRequirementDropdown(_continuousRequirement, (val) => setState(() => _continuousRequirement = val ?? 'Both (Time In & Out)')),
           Row(
             children: [
               Expanded(child: _buildPickerField('Start Date *', _startDate == null ? 'dd/mm/yyyy' : DateFormat('dd/MM/yyyy').format(_startDate!), () => _selectDate(true))),
               const SizedBox(width: 16),
-              Expanded(child: _buildPickerField('Start Time *', _startTime == null ? '--:-- --' : _startTime!.format(context), () => _selectTime(true))),
+              if (_continuousRequirement != 'Time Out Only')
+                Expanded(child: _buildPickerField('Start Time *', _startTime == null ? '--:-- --' : _startTime!.format(context), () => _selectTime(true)))
+              else
+                const Spacer(),
             ],
           ),
           const SizedBox(height: 16),
@@ -569,26 +635,70 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           const SizedBox(height: 16),
           const Text('Morning Session', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
+          _buildRequirementDropdown(_morningRequirement, (val) => setState(() => _morningRequirement = val ?? 'Both (Time In & Out)')),
           Row(
             children: [
-              Expanded(child: _buildPickerField('Morning Time In *', _morningIn == null ? '--:-- --' : _morningIn!.format(context), () => _selectSpecificTime('morning', true))),
+              if (_morningRequirement != 'Time Out Only')
+                Expanded(child: _buildPickerField('Morning Time In *', _morningIn == null ? '--:-- --' : _morningIn!.format(context), () => _selectSpecificTime('morning', true)))
+              else
+                const Spacer(),
               const SizedBox(width: 16),
-              Expanded(child: _buildPickerField('Morning Time Out *', _morningOut == null ? '--:-- --' : _morningOut!.format(context), () => _selectSpecificTime('morning', false))),
+              if (_morningRequirement != 'Time In Only')
+                Expanded(child: _buildPickerField('Morning Time Out *', _morningOut == null ? '--:-- --' : _morningOut!.format(context), () => _selectSpecificTime('morning', false)))
+              else
+                const Spacer(),
             ],
           ),
           const SizedBox(height: 16),
           const Text('Afternoon Session', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
+          _buildRequirementDropdown(_afternoonRequirement, (val) => setState(() => _afternoonRequirement = val ?? 'Both (Time In & Out)')),
           Row(
             children: [
-              Expanded(child: _buildPickerField('Afternoon Time In *', _afternoonIn == null ? '--:-- --' : _afternoonIn!.format(context), () => _selectSpecificTime('afternoon', true))),
+              if (_afternoonRequirement != 'Time Out Only')
+                Expanded(child: _buildPickerField('Afternoon Time In *', _afternoonIn == null ? '--:-- --' : _afternoonIn!.format(context), () => _selectSpecificTime('afternoon', true)))
+              else
+                const Spacer(),
               const SizedBox(width: 16),
-              Expanded(child: _buildPickerField('Afternoon Time Out *', _afternoonOut == null ? '--:-- --' : _afternoonOut!.format(context), () => _selectSpecificTime('afternoon', false))),
+              if (_afternoonRequirement != 'Time In Only')
+                Expanded(child: _buildPickerField('Afternoon Time Out *', _afternoonOut == null ? '--:-- --' : _afternoonOut!.format(context), () => _selectSpecificTime('afternoon', false)))
+              else
+                const Spacer(),
             ],
           ),
         ],
         const SizedBox(height: 16),
-        _buildTextField('Late Cutoff (minutes after start) *', '15', _lateCutoff.toString(), (val) => _lateCutoff = int.tryParse(val) ?? 15, type: TextInputType.number),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Late Cutoff (minutes after start) *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<int>(
+              value: _lateCutoff,
+              decoration: InputDecoration(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _primaryGreen, width: 2)),
+              ),
+              items: const [
+                DropdownMenuItem(value: 10, child: Text('10 minutes')),
+                DropdownMenuItem(value: 15, child: Text('15 minutes')),
+                DropdownMenuItem(value: 30, child: Text('30 minutes')),
+                DropdownMenuItem(value: 60, child: Text('60 minutes')),
+              ],
+              onChanged: (newValue) {
+                if (newValue != null && mounted) {
+                  setState(() {
+                    _lateCutoff = newValue;
+                  });
+                }
+              },
+              icon: Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade600),
+              style: TextStyle(color: _darkText, fontSize: 14),
+            ),
+          ],
+        ),
       ],
     );
   }
