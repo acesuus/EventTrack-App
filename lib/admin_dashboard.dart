@@ -36,7 +36,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final result = await SchoolYearService.checkAndRollover();
       if (!mounted || !result.rolledOver) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('New school year ${result.schoolYear}: ${result.promoted} students promoted.'),
+        content: Text('New school year ${result.schoolYear}: ${result.promoted} students promoted, '
+            '${result.graduated} graduated students removed.'),
       ));
     } catch (e) {
       debugPrint('School year rollover failed: $e');

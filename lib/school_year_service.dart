@@ -5,11 +5,13 @@ class SchoolYearRolloverResult {
   final bool rolledOver;
   final String schoolYear;
   final int promoted;
+  final int graduated;
 
   const SchoolYearRolloverResult({
     required this.rolledOver,
     required this.schoolYear,
     this.promoted = 0,
+    this.graduated = 0,
   });
 }
 
@@ -66,16 +68,23 @@ class SchoolYearService {
       return SchoolYearRolloverResult(rolledOver: false, schoolYear: label);
     }
 
-    final promoted = await _promoteStudents(yearsElapsed);
-    return SchoolYearRolloverResult(rolledOver: true, schoolYear: label, promoted: promoted);
+    final counts = await _promoteStudents(yearsElapsed);
+    return SchoolYearRolloverResult(
+      rolledOver: true,
+      schoolYear: label,
+      promoted: counts.promoted,
+      graduated: counts.graduated,
+    );
   }
 
   /// Increments the year level in each student's `yearBlock` (e.g. "1-A" -> "2-A").
-  static Future<int> _promoteStudents(int yearsElapsed) async {
+  /// Students who go past [maxYearLevel] have graduated and are removed from the list.
+  static Future<({int promoted, int graduated})> _promoteStudents(int yearsElapsed) async {
     final students = await _firestore.collection('students').get();
     WriteBatch batch = _firestore.batch();
     int batchCount = 0;
     int promoted = 0;
+    int graduated = 0;
 
     for (final doc in students.docs) {
       final yearBlock = (doc.data()['yearBlock'] ?? '').toString().trim();
@@ -84,10 +93,13 @@ class SchoolYearService {
 
       final currentLevel = int.parse(match.group(1)!);
       final newLevel = currentLevel + yearsElapsed;
-      if (newLevel > maxYearLevel) continue;
-
-      batch.update(doc.reference, {'yearBlock': '$newLevel${match.group(2)}'});
-      promoted++;
+      if (newLevel > maxYearLevel) {
+        batch.delete(doc.reference);
+        graduated++;
+      } else {
+        batch.update(doc.reference, {'yearBlock': '$newLevel${match.group(2)}'});
+        promoted++;
+      }
       batchCount++;
 
       if (batchCount == 499) {
@@ -98,6 +110,6 @@ class SchoolYearService {
     }
 
     if (batchCount > 0) await batch.commit();
-    return promoted;
+    return (promoted: promoted, graduated: graduated);
   }
 }
