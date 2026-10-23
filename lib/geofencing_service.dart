@@ -10,10 +10,10 @@ class GeofencingService {
   static DateTime? _lockoutEndTime;
 
   static Future<bool> _isEnvironmentSecure(Position position) async {
-    // TODO: Re-enable mock location block before production
-    // if (position.isMocked) {
-    //   return false;
-    // }
+    // SECURITY: Reject mock locations (GPS spoofing)
+    if (position.isMocked) {
+      return false;
+    }
 
     if (!kIsWeb) {
       final deviceInfo = DeviceInfoPlugin();

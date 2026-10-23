@@ -10,6 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import 'attendance_monitoring_screen.dart';
+import 'export_utils.dart';
 import 'manage_events_screen.dart';
 
 class AdminSettingsScreen extends StatefulWidget {
@@ -97,242 +98,6 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     }
   }
 
-  Future<void> _showExportDialog() async {
-    final firestore = FirebaseFirestore.instance;
-    final snapshot = await firestore.collection('events').get();
-    
-    if (snapshot.docs.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No events found.')));
-      return;
-    }
-
-    List<String> selectedEventIds = [];
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Export Event Reports'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: snapshot.docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = snapshot.docs[index];
-                    final eventId = doc.id;
-                    final title = doc['title'] ?? 'Unknown Event';
-                    final isSelected = selectedEventIds.contains(eventId);
-
-                    return CheckboxListTile(
-                      title: Text(title),
-                      value: isSelected,
-                      onChanged: (bool? value) {
-                        setState(() {
-                          if (value == true) {
-                            selectedEventIds.add(eventId);
-                          } else {
-                            selectedEventIds.remove(eventId);
-                          }
-                        });
-                      },
-                    );
-                  },
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: selectedEventIds.isEmpty ? null : () {
-                    Navigator.pop(context);
-                    _generateAndShareCSV(selectedEventIds);
-                  },
-                  child: const Text('Generate CSV'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryGreen,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: selectedEventIds.isEmpty ? null : () {
-                    Navigator.pop(context);
-                    _generateAndSharePDF(selectedEventIds);
-                  },
-                  child: const Text('Generate PDF'),
-                ),
-              ],
-            );
-          }
-        );
-      },
-    );
-  }
-
-  Future<void> _generateAndShareCSV(List<String> selectedEventIds) async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating CSV...')));
-
-    try {
-      final firestore = FirebaseFirestore.instance;
-      
-      final studentsSnapshot = await firestore.collection('students').get();
-      Map<String, Map<String, dynamic>> studentsMap = {};
-      for (var doc in studentsSnapshot.docs) {
-        studentsMap[doc.id] = doc.data();
-      }
-
-      List<List<dynamic>> csvData = [
-        ['Event Name', 'Student ID', 'Student Name', 'Program', 'Year & Block', 'Status', 'Points', 'Time In']
-      ];
-
-      for (String eventId in selectedEventIds) {
-        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
-        
-        Map<String, dynamic> eventAttendanceMap = {};
-        for (var doc in attendanceSnapshot.docs) {
-          final attData = doc.data();
-          if (attData['studentId'] != null) {
-            eventAttendanceMap[attData['studentId']] = attData;
-          }
-        }
-
-        studentsMap.forEach((studentId, studentData) {
-          String rawId = studentId.replaceAll('-', '');
-          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
-          
-          if (attendanceRecord != null) {
-            String timeInStr = '';
-            if (attendanceRecord['timeIn'] is Timestamp) {
-              timeInStr = (attendanceRecord['timeIn'] as Timestamp).toDate().toIso8601String();
-            }
-
-            csvData.add([
-              attendanceRecord['eventName'] ?? attendanceRecord['eventTitle'] ?? 'Event',
-              studentId,
-              studentData['name'] ?? '',
-              studentData['program'] ?? '',
-              studentData['yearBlock'] ?? '',
-              attendanceRecord['status'] ?? '',
-              attendanceRecord['pointsAwarded'] ?? '',
-              timeInStr,
-            ]);
-          }
-        });
-      }
-
-      String csvOutput = const csv_pkg.ListToCsvConverter().convert(csvData);
-
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.csv');
-      await file.writeAsString(csvOutput);
-
-      await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report');
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating CSV: $e')));
-      }
-    }
-  }
-
-  Future<void> _generateAndSharePDF(List<String> selectedEventIds) async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF...')));
-
-    try {
-      final firestore = FirebaseFirestore.instance;
-      
-      final studentsSnapshot = await firestore.collection('students').get();
-      Map<String, Map<String, dynamic>> studentsMap = {};
-      for (var doc in studentsSnapshot.docs) {
-        studentsMap[doc.id] = doc.data();
-      }
-
-      final pdf = pw.Document();
-
-      for (String eventId in selectedEventIds) {
-        final eventDoc = await firestore.collection('events').doc(eventId).get();
-        final eventName = eventDoc.data()?['title'] ?? 'Event';
-        
-        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
-        
-        Map<String, dynamic> eventAttendanceMap = {};
-        for (var doc in attendanceSnapshot.docs) {
-          final attData = doc.data();
-          if (attData['studentId'] != null) {
-            eventAttendanceMap[attData['studentId']] = attData;
-          }
-        }
-
-        List<List<String>> tableData = [
-          ['Student ID', 'Name', 'Program', 'Year/Block', 'Status', 'Points', 'Time In']
-        ];
-
-        studentsMap.forEach((studentId, studentData) {
-          String rawId = studentId.replaceAll('-', '');
-          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
-          
-          if (attendanceRecord != null) {
-            String timeInStr = '';
-            if (attendanceRecord['timeIn'] is Timestamp) {
-              final date = (attendanceRecord['timeIn'] as Timestamp).toDate();
-              timeInStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-            }
-
-            tableData.add([
-              studentId,
-              studentData['name']?.toString() ?? '',
-              studentData['program']?.toString() ?? '',
-              studentData['yearBlock']?.toString() ?? '',
-              attendanceRecord['status']?.toString() ?? '',
-              attendanceRecord['pointsAwarded']?.toString() ?? '',
-              timeInStr,
-            ]);
-          }
-        });
-
-        pdf.addPage(
-          pw.MultiPage(
-            pageFormat: PdfPageFormat.a4,
-            margin: const pw.EdgeInsets.all(32),
-            build: (pw.Context context) {
-              return [
-                pw.Header(
-                  level: 0,
-                  child: pw.Text('Attendance Report: $eventName', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-                ),
-                pw.SizedBox(height: 10),
-                pw.TableHelper.fromTextArray(
-                  context: context,
-                  data: tableData,
-                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-                  headerDecoration: const pw.BoxDecoration(color: PdfColors.green800),
-                  cellAlignment: pw.Alignment.centerLeft,
-                  cellPadding: const pw.EdgeInsets.all(5),
-                ),
-              ];
-            },
-          ),
-        );
-      }
-
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      await file.writeAsBytes(await pdf.save());
-
-      await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report (PDF)');
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -518,7 +283,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                       decoration: const InputDecoration(labelText: 'Student ID'),
                     ),
                     DropdownButtonFormField<String>(
-                      value: program,
+                      initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
                       items: ['BSCS', 'BSIT', 'BSIS'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                       onChanged: (val) => setState(() => program = val!),
@@ -572,6 +337,129 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
+  Future<void> _showEditStudentDialog() async {
+    final TextEditingController idCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Student Details'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Enter the Student ID to fetch their details.'),
+              TextFormField(
+                controller: idCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Student ID'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                String rawId = idCtrl.text.replaceAll('-', '').trim();
+                if (rawId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a Student ID.')));
+                  return;
+                }
+                String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
+                
+                final doc = await FirebaseFirestore.instance.collection('students').doc(finalId).get();
+                if (!mounted) return;
+                
+                if (doc.exists) {
+                  Navigator.pop(context); // Close the fetch dialog
+                  _showUpdateStudentForm(finalId, doc.data() as Map<String, dynamic>);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student not found.')));
+                }
+              },
+              child: const Text('Fetch'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showUpdateStudentForm(String studentId, Map<String, dynamic> existingData) {
+    final TextEditingController nameCtrl = TextEditingController(text: existingData['name'] ?? '');
+    String program = existingData['program'] ?? 'BSCS';
+    final TextEditingController yearBlockCtrl = TextEditingController(text: existingData['yearBlock'] ?? '');
+
+    if (!['BSCS', 'BSIT', 'BSIS'].contains(program)) {
+      program = 'BSCS'; // Fallback
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Edit $studentId'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Full Name'),
+                    ),
+                    DropdownButtonFormField<String>(
+                      initialValue: program,
+                      decoration: const InputDecoration(labelText: 'Program'),
+                      items: ['BSCS', 'BSIT', 'BSIS'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                      onChanged: (val) => setState(() => program = val!),
+                    ),
+                    TextFormField(
+                      controller: yearBlockCtrl,
+                      decoration: const InputDecoration(labelText: 'Year & Block (e.g., 1-A)'),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (nameCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name is required.')));
+                      return;
+                    }
+                    
+                    try {
+                      await FirebaseFirestore.instance.collection('students').doc(studentId).update({
+                        'name': nameCtrl.text.trim(),
+                        'program': program,
+                        'yearBlock': yearBlockCtrl.text.trim(),
+                      });
+                      if (!mounted) return;
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student updated successfully.')));
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  },
+                  child: const Text('Update'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
   Widget _buildDataManagementCard() {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -592,7 +480,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             textColor: _primaryGreen,
             bgColor: _primaryGreen.withValues(alpha: 0.1),
             borderColor: _primaryGreen.withValues(alpha: 0.3),
-            onTap: _showExportDialog,
+            onTap: () => ExportUtils.showExportDialog(context, _primaryGreen),
           ),
           const SizedBox(height: 12),
           _buildActionButton(
@@ -609,6 +497,14 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             bgColor: _primaryGreen,
             borderColor: _primaryGreen,
             onTap: _showAddStudentDialog,
+          ),
+          const SizedBox(height: 12),
+          _buildActionButton(
+            label: 'Edit Student Details',
+            textColor: _primaryGreen,
+            bgColor: Colors.white,
+            borderColor: _primaryGreen,
+            onTap: _showEditStudentDialog,
           ),
         ],
       ),

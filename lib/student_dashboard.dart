@@ -13,7 +13,6 @@ import 'package:table_calendar/table_calendar.dart';
 
 import 'attendance_policy.dart';
 import 'event_tracking_screen.dart';
-import 'geofencing_service.dart';
 import 'student_consent_screen.dart';
 import 'student_login_screen.dart';
 
@@ -62,7 +61,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         final String eventId = data['eventId'];
         final String eventName = data['eventName'];
         final String status = data['status'];
-        final int pointsAwarded = data['pointsAwarded'];
+        final int pointsAwarded = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
         final String timestampStr = data['timestamp'];
 
         final docRef = _firestore.collection('attendance').doc('${widget.studentId}_$eventId');
@@ -997,6 +996,72 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
+  Future<void> _showEditProfileDialog(String currentName, String currentEmail) async {
+    final TextEditingController nameCtrl = TextEditingController(text: currentName);
+    final TextEditingController emailCtrl = TextEditingController(text: currentEmail == 'No email saved' ? '' : currentEmail);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Profile'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Full Name'),
+              ),
+              TextFormField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'School Email'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newName = nameCtrl.text.trim();
+                final newEmail = emailCtrl.text.trim();
+
+                if (newName.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name cannot be empty.')));
+                  return;
+                }
+
+                try {
+                  // Update both collections!
+                  await _firestore.collection('users').doc(widget.studentId).update({
+                    'name': newName,
+                    'email': newEmail,
+                  });
+
+                  await _firestore.collection('students').doc(widget.studentId).set({
+                    'studentId': widget.studentId,
+                    'name': newName,
+                    'email': newEmail,
+                  }, SetOptions(merge: true));
+
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully!')));
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildSettingsTab() {
     return Column(
       children: [
@@ -1019,6 +1084,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                   userData['registeredDeviceId']?.toString() ??
                   'Not registered';
               final email = userData['email']?.toString() ?? 'No email saved';
+              final name = userData['name']?.toString() ?? widget.studentName;
               final deviceProtected =
                   deviceId.isNotEmpty && deviceId != 'Not registered';
 
@@ -1029,9 +1095,22 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     title: 'Student Account',
                     icon: Icons.person_outline,
                     children: [
-                      _buildSettingsRow('Name', widget.studentName),
+                      _buildSettingsRow('Name', name),
                       _buildSettingsRow('Student ID', widget.studentId),
                       _buildSettingsRow('School Email', email),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.edit, size: 18),
+                        label: const Text('Edit Profile'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: _primaryGreen,
+                          elevation: 0,
+                          side: BorderSide(color: Colors.grey.shade300),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => _showEditProfileDialog(name, email),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),

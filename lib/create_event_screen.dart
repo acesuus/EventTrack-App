@@ -172,11 +172,17 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     if (picked != null && mounted) {
       setState(() {
         if (session == 'morning') {
-          if (isIn) _morningIn = picked;
-          else _morningOut = picked;
+          if (isIn) {
+            _morningIn = picked;
+          } else {
+            _morningOut = picked;
+          }
         } else if (session == 'afternoon') {
-          if (isIn) _afternoonIn = picked;
-          else _afternoonOut = picked;
+          if (isIn) {
+            _afternoonIn = picked;
+          } else {
+            _afternoonOut = picked;
+          }
         }
       });
     }
@@ -264,6 +270,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       final aIn = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonIn!.hour, _afternoonIn!.minute);
       final aOut = DateTime(_singleEventDate!.year, _singleEventDate!.month, _singleEventDate!.day, _afternoonOut!.hour, _afternoonOut!.minute);
 
+      if (mOut.isBefore(mIn) || aIn.isBefore(mOut) || aOut.isBefore(aIn)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Times must be chronological! (Morning In < Morning Out < Afternoon In < Afternoon Out)')),
+        );
+        return;
+      }
+
       eventPayload['morningStartTime'] = Timestamp.fromDate(mIn);
       eventPayload['morningEndTime'] = Timestamp.fromDate(mOut);
       eventPayload['afternoonStartTime'] = Timestamp.fromDate(aIn);
@@ -274,6 +287,14 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     } else {
       final startDateTime = DateTime(_startDate!.year, _startDate!.month, _startDate!.day, _startTime!.hour, _startTime!.minute);
       final endDateTime = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, _endTime!.hour, _endTime!.minute);
+
+      if (endDateTime.isBefore(startDateTime) || endDateTime.isAtSameMomentAs(startDateTime)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End time must be after the start time!')),
+        );
+        return;
+      }
+
       eventPayload['startTime'] = Timestamp.fromDate(startDateTime);
       eventPayload['endTime'] = Timestamp.fromDate(endDateTime);
     }

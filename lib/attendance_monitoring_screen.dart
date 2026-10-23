@@ -254,8 +254,9 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
             combinedItem['timeOut'] = attendanceRecord['timeOut'];
             
             totalTurnout++;
-            if (status == 'Present') present++;
-            else if (status == 'Late') late++;
+            if (status == 'Present') {
+              present++;
+            } else if (status == 'Late') late++;
             else if (status == 'Partial') partial++;
           } else {
             combinedItem['status'] = 'Absent';
