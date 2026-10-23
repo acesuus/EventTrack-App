@@ -30,6 +30,75 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   bool _notificationsEnabled = true;
   bool _autoBackupEnabled = true;
 
+  /// Shows the required CSV column format before letting the admin pick a file.
+  Future<void> _showImportInstructions() async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.blue.shade700),
+            const SizedBox(width: 8),
+            const Text('Import Instructions'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Your CSV file must have these columns in this exact order:'),
+              const SizedBox(height: 12),
+              Table(
+                border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
+                columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+                children: [
+                  _instructionRow('Col', 'Field (Example)', isHeader: true),
+                  _instructionRow('A', 'Student ID (2021-1-00123)'),
+                  _instructionRow('B', 'Full Name (Juan D. Cruz)'),
+                  _instructionRow('C', 'Program (BSCS, BSIT, BSIS)'),
+                  _instructionRow('D', 'Year & Block (1-A)'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '• The first row is treated as a header and will be skipped.\n'
+                '• Student ID may be written with or without dashes.\n'
+                '• Year & Block must start with the year level (1-4), e.g. 3-B.\n'
+                '• Existing students with the same ID will be updated.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Choose CSV File'),
+          ),
+        ],
+      ),
+    );
+
+    if (proceed == true) {
+      await _importStudentCSV();
+    }
+  }
+
+  TableRow _instructionRow(String col, String field, {bool isHeader = false}) {
+    final style = TextStyle(fontSize: 13, fontWeight: isHeader ? FontWeight.bold : FontWeight.normal, color: _darkText);
+    return TableRow(
+      decoration: isHeader ? BoxDecoration(color: Colors.blue.withValues(alpha: 0.08)) : null,
+      children: [
+        Padding(padding: const EdgeInsets.all(8), child: Text(col, style: style)),
+        Padding(padding: const EdgeInsets.all(8), child: Text(field, style: style)),
+      ],
+    );
+  }
+
   Future<void> _importStudentCSV() async {
     fp.FilePickerResult? result = await fp.FilePicker.platform.pickFiles(
       type: fp.FileType.custom,
@@ -488,7 +557,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             textColor: Colors.blue.shade700,
             bgColor: Colors.blue.withValues(alpha: 0.1),
             borderColor: Colors.blue.withValues(alpha: 0.3),
-            onTap: _importStudentCSV,
+            onTap: _showImportInstructions,
           ),
           const SizedBox(height: 12),
           _buildActionButton(
