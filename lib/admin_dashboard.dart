@@ -7,6 +7,7 @@ import 'attendance_monitoring_screen.dart';
 import 'create_event_screen.dart';
 import 'export_utils.dart';
 import 'manage_events_screen.dart';
+import 'school_year_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -22,6 +23,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final Color _primaryGreen = const Color(0xFF28A776);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSchoolYearRollover();
+  }
+
+  /// Promotes students to the next year level when a new school year begins.
+  Future<void> _checkSchoolYearRollover() async {
+    try {
+      final result = await SchoolYearService.checkAndRollover();
+      if (!mounted || !result.rolledOver) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('New school year ${result.schoolYear}: ${result.promoted} students promoted.'),
+      ));
+    } catch (e) {
+      debugPrint('School year rollover failed: $e');
+    }
+  }
 
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return "Unknown";
