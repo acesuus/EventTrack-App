@@ -1,3 +1,4 @@
+import 'widgets/eventtrack_brand.dart';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -73,7 +74,8 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       }
 
       // 1. CLOUD DEVICE GATEKEEPER: Check if this phone is already owned by someone else
-      final deviceCheck = await _firestore.collection('users')
+      final deviceCheck = await _firestore
+          .collection('users')
           .where('registeredDeviceId', isEqualTo: currentDeviceId)
           .get();
 
@@ -193,17 +195,10 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Logo & Headers
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: _primaryGreen,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.school, color: Colors.white, size: 50),
-              ),
+              const EventTrackMark(size: 90),
               const SizedBox(height: 24),
               Text(
-                'Event Track',
+                'EventTrack',
                 style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.bold,

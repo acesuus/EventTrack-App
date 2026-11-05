@@ -5,13 +5,32 @@
             "name": "Admin App",
             "request": "launch",
             "type": "dart",
-            "program": "lib/main_admin.dart"
+            "program": "lib/main_admin.dart",
+            "toolArgs": [
+                "--flavor",
+                "admin"
+            ]
         },
         {
             "name": "Student App",
             "request": "launch",
             "type": "dart",
-            "program": "lib/main_student.dart"
+            "program": "lib/main_student.dart",
+            "toolArgs": [
+                "--flavor",
+                "student"
+            ]
+        },
+        {
+            "name": "Admin App (local demo)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main_admin.dart",
+            "toolArgs": [
+                "--flavor",
+                "admin",
+                "--dart-define-from-file=.firebase/admin-demo.json"
+            ]
         }
     ]
 }

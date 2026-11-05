@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'attendance_policy.dart';
 import 'geofencing_service.dart';
+import 'joined_events_store.dart';
+import 'widgets/student_ui.dart';
 
 class EventTrackingScreen extends StatefulWidget {
   final String studentId;
@@ -30,11 +32,12 @@ class EventTrackingScreen extends StatefulWidget {
 
 class _EventTrackingScreenState extends State<EventTrackingScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Color _primaryGreen = const Color(0xFF28A776);
-  final Color _darkText = const Color(0xFF0C2D48);
+  final Color _primaryGreen = StudentUi.green;
+  final Color _darkText = StudentUi.ink;
 
-  double get _eventRadius => (widget.eventData['radius'] as num?)?.toDouble() ?? 50.0;
-  
+  double get _eventRadius =>
+      (widget.eventData['radius'] as num?)?.toDouble() ?? 50.0;
+
   List<LatLng> get _eventPolygon {
     final rawPoints = widget.eventData['polygonPoints'] as List<dynamic>?;
     if (rawPoints == null) return [];
@@ -59,7 +62,22 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_rememberJoinedEvent());
     _checkAndLogLocation();
+  }
+
+  Future<void> _rememberJoinedEvent() async {
+    try {
+      await JoinedEventsStore.instance.join(widget.studentId, widget.eventId);
+    } catch (error) {
+      debugPrint('Could not save joined event: $error');
+    }
+  }
+
+  Future<void> _backToDashboard() async {
+    await _rememberJoinedEvent();
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   @override
@@ -82,8 +100,10 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   Timestamp get _eventEndTimestamp => widget.eventData['endTime'] as Timestamp;
 
   String get _eventTitle => widget.eventData['title']?.toString() ?? 'Event';
-  
-  String get _eventType => widget.eventData['eventType']?.toString() ?? AttendancePolicy.eventTypeContinuous;
+
+  String get _eventType =>
+      widget.eventData['eventType']?.toString() ??
+      AttendancePolicy.eventTypeContinuous;
 
   LatLng? get _studentPoint => _currentPosition == null
       ? null
@@ -96,7 +116,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     );
   }
 
-  Future<void> _checkAndLogLocation() async {
+  Future<void> _checkAndLogLocation({bool checkOutRequested = false}) async {
     if (!mounted) return;
     setState(() {
       _isCheckingLocation = true;
@@ -138,15 +158,20 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       } catch (e) {
         pos = await Geolocator.getLastKnownPosition();
       }
-      
+
       if (pos == null) {
         if (!mounted) return;
         setState(() {
           _isCheckingLocation = false;
-          _locationError = 'Weak GPS signal. Please step near a window or go outside.';
+          _locationError =
+              'Weak GPS signal. Please step near a window or go outside.';
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Weak GPS signal. Please step near a window or go outside.')),
+          const SnackBar(
+            content: Text(
+              'Weak GPS signal. Please step near a window or go outside.',
+            ),
+          ),
         );
         return;
       }
@@ -158,10 +183,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         _eventPoint.longitude,
       );
       final currentlyInside = await GeofencingService.isStudentInsideEvent(
-        pos, 
-        widget.eventData, 
-        useMock: false
+        pos,
+        widget.eventData,
+        useMock: false,
       );
+      if (!mounted) return;
 
       if (pos.isMocked) {
         if (!mounted) return;
@@ -205,6 +231,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       }
 
       final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
       final isOffline = prefs.containsKey('cached_today_events');
 
       if (isOffline) {
@@ -221,8 +248,10 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         } else {
           final queueStr = prefs.getString('offline_attendance_queue');
           List<dynamic> queue = queueStr != null ? jsonDecode(queueStr) : [];
-          
-          bool isDuplicate = queue.any((item) => item['eventId'] == widget.eventId);
+
+          bool isDuplicate = queue.any(
+            (item) => item['eventId'] == widget.eventId,
+          );
           if (isDuplicate) {
             setState(() {
               _currentPosition = pos;
@@ -234,14 +263,20 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
             });
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Attendance already recorded locally. Sync required.')),
+                const SnackBar(
+                  content: Text(
+                    'Attendance already recorded locally. Sync required.',
+                  ),
+                ),
               );
             }
             return;
           }
 
-          final int basePoints = int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
-          
+          final int basePoints =
+              int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ??
+              10;
+
           final newRecord = {
             'eventId': widget.eventId,
             'eventName': widget.eventData['title'] ?? 'Unknown Event',
@@ -249,10 +284,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
             'pointsAwarded': basePoints,
             'timestamp': DateTime.now().toIso8601String(),
           };
-          
+
           queue.add(newRecord);
           await prefs.setString('offline_attendance_queue', jsonEncode(queue));
-          
+          if (!mounted) return;
+
           setState(() {
             _currentPosition = pos;
             _distanceToVenueMeters = distanceInMeters;
@@ -267,7 +303,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Attendance recorded locally. Sync required.')),
+              const SnackBar(
+                content: Text('Attendance recorded locally. Sync required.'),
+              ),
             );
           }
           return;
@@ -275,7 +313,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       }
 
       final now = Timestamp.now();
-      await _processAttendanceLogic(currentlyInside, now);
+      await _processAttendanceLogic(
+        currentlyInside,
+        now,
+        checkOutRequested: checkOutRequested,
+      );
 
       if (!mounted) return;
       setState(() {
@@ -295,15 +337,19 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     }
   }
 
-  Future<void> _processAttendanceLogic(bool currentlyInside, Timestamp now) async {
+  Future<void> _processAttendanceLogic(
+    bool currentlyInside,
+    Timestamp now, {
+    bool checkOutRequested = false,
+  }) async {
     final docSnap = await _attendanceRef.get();
     Map<String, dynamic> data = docSnap.exists ? docSnap.data()! : {};
-    
+
     String currentStatus = data['status'] as String? ?? 'Pending';
     Timestamp? timeIn = data['timeIn'] as Timestamp?;
     Timestamp? timeOut = data['timeOut'] as Timestamp?;
     Timestamp? lastVerified = data['lastVerified'] as Timestamp?;
-    
+
     if (timeOut != null) {
       // Already finalized
       _applyLocalState(data, currentlyInside);
@@ -313,40 +359,19 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     bool updated = false;
 
     if (_eventType == AttendancePolicy.eventTypeInOut) {
-      // Type 1: Time In / Time Out
-      if (timeIn == null) {
-        if (currentlyInside) {
-          timeIn = now;
-          currentStatus = AttendancePolicy.determineInitialStatus(
-            checkInTime: now.toDate(),
-            eventStart: _eventStartTimestamp.toDate(),
-            lateCutoffMinutes: widget.eventData['lateCutoffMinutes'] ?? 15,
-          );
-          data['timeIn'] = timeIn;
-          data['status'] = currentStatus;
-          data['initialStatus'] = currentStatus;
-          updated = true;
-        }
-      } else {
-        if (currentlyInside) {
-          // Verify checkout
-          timeOut = now;
-          data['timeOut'] = timeOut;
-          data['status'] = currentStatus; // keeps initial status
-          updated = true;
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Time Out logged successfully! Attendance Finalized.')),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('You must be inside the venue to Time Out.'), backgroundColor: Colors.red),
-            );
-          }
-        }
+      data = AttendancePolicy.verifyInOutAttendance(
+        existing: data,
+        verifiedAt: now,
+        eventStart: _eventStartTimestamp.toDate(),
+        isInside: currentlyInside,
+        checkOutRequested: checkOutRequested,
+        lateCutoffMinutes: widget.eventData['lateCutoffMinutes'] ?? 15,
+      );
+      updated = data['timeIn'] != timeIn || data['timeOut'] != timeOut;
+      if (checkOutRequested && timeIn != null && !currentlyInside && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Return to the venue to check out.')),
+        );
       }
     } else {
       // Type 2: Continuous Stay
@@ -371,20 +396,32 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         } else {
           // Student is outside. Check grace period.
           if (lastVerified != null) {
-            final minsGone = now.toDate().difference(lastVerified.toDate()).inMinutes;
+            final minsGone = now
+                .toDate()
+                .difference(lastVerified.toDate())
+                .inMinutes;
             if (minsGone > 20) {
               currentStatus = 'Partial';
               data['status'] = currentStatus;
               updated = true;
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('You have been outside for over 20 mins. Status changed to Partial.'), backgroundColor: Colors.orange),
+                  const SnackBar(
+                    content: Text(
+                      'You have been outside for over 20 mins. Status changed to Partial.',
+                    ),
+                    backgroundColor: StudentUi.muted,
+                  ),
                 );
               }
             } else {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Warning: You are outside the venue. Return within ${20 - minsGone} mins to avoid penalty.')),
+                  SnackBar(
+                    content: Text(
+                      'Warning: You are outside the venue. Return within ${20 - minsGone} mins to avoid penalty.',
+                    ),
+                  ),
                 );
               }
             }
@@ -394,7 +431,8 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     }
 
     if (updated) {
-      final int basePoints = int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
+      final int basePoints =
+          int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
       String finalStatus = data['status'] as String? ?? 'Present';
       int pointsAwarded = 0;
       if (finalStatus == 'Present') {
@@ -412,8 +450,15 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       data['eventName'] = widget.eventData['title'] ?? 'Unknown Event';
       data['pointsAwarded'] = pointsAwarded;
       await _attendanceRef.set(data, SetOptions(merge: true));
+      if (checkOutRequested && data['timeOut'] != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Checked out. Your attendance has been saved.'),
+          ),
+        );
+      }
     }
-    
+
     _applyLocalState(data, currentlyInside);
   }
 
@@ -422,11 +467,13 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     _timeIn = data['timeIn'] as Timestamp?;
     _timeOut = data['timeOut'] as Timestamp?;
     _attendanceFinalized = _timeOut != null;
-    
+
     if (_attendanceStatus == null) {
       _currentStatus = 'Outside Event Area';
     } else {
-      _currentStatus = currentlyInside ? 'Inside Event Area' : 'Outside Event Area';
+      _currentStatus = currentlyInside
+          ? 'Inside Event Area'
+          : 'Outside Event Area';
     }
   }
 
@@ -470,7 +517,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   String get _statusTitle {
     if (_locationError != null) return _locationError!;
     if (_currentStatus == 'Spoofing Detected') return 'Spoofing Detected';
-    if (_isCheckingLocation) return 'Searching Location...';
+    if (_isCheckingLocation) return 'Checking your location';
     if (_attendanceStatus != null) {
       return _displayAttendanceStatus(_attendanceStatus!);
     }
@@ -478,6 +525,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   }
 
   String get _statusSubtitle {
+    if (_isCheckingLocation) {
+      return 'Please wait while we verify your position at the venue.';
+    }
     if (_attendanceFinalized) {
       return 'Attendance saved as ${_attendanceStatus != null ? _displayAttendanceStatus(_attendanceStatus!) : 'Recorded'}.';
     }
@@ -485,25 +535,25 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       return 'Location is needed to validate attendance';
     }
     if (_attendanceStatus == null) {
-      return 'Tap Refresh to check in when inside the geofence.';
+      return 'Go to the event venue, then verify your location to check in.';
     }
-    
+
     if (_eventType == AttendancePolicy.eventTypeInOut) {
-      return 'You are checked in. Tap Refresh when you are ready to Time Out before leaving.';
+      return 'You are checked in. Check out at the venue when you are ready to leave.';
     } else {
       if (!_isInside) {
         return 'You are outside the event area. Return within the grace period to avoid Partial status.';
       }
-      return 'Your attendance is active. Tap Refresh occasionally to verify you are still inside.';
+      return 'Your attendance is active. Verify your location regularly while at the venue.';
     }
   }
 
   Color _attendanceColor(String status) {
     switch (status) {
       case 'Late':
-        return Colors.orange;
+        return StudentUi.muted;
       case 'Partial':
-        return Colors.amber.shade700;
+        return StudentUi.muted;
       case 'Present':
       default:
         return _primaryGreen;
@@ -524,11 +574,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     if (_currentStatus == 'Spoofing Detected' || _locationError != null) {
       return Colors.red;
     }
-    if (_isCheckingLocation) return Colors.orange;
+    if (_isCheckingLocation) return StudentUi.muted;
     if (_attendanceStatus != null) {
       return _attendanceColor(_attendanceStatus!);
     }
-    return _isInside ? _primaryGreen : Colors.orange;
+    return _isInside ? _primaryGreen : StudentUi.muted;
   }
 
   LatLng get _mapCenter => _eventPoint;
@@ -549,11 +599,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       height: 220,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.green.shade50,
-        borderRadius: BorderRadius.circular(16),
+        color: StudentUi.background,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
             FlutterMap(
@@ -600,7 +650,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                             ),
                             decoration: BoxDecoration(
                               color: Colors.white,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(3),
                             ),
                             child: const Text(
                               'Event',
@@ -646,7 +696,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white,
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(3),
                               ),
                               child: const Text(
                                 'You',
@@ -679,244 +729,273 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFEAF9F1),
-      appBar: AppBar(
-        backgroundColor: _primaryGreen,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Event Tracking',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+  String get _verificationLabel {
+    if (_isCheckingLocation) return 'Checking location…';
+    if (_attendanceFinalized) return 'Attendance saved';
+    if (_eventType == AttendancePolicy.eventTypeInOut && _timeIn != null) {
+      return 'Check out';
+    }
+    return _timeIn == null ? 'Verify location & check in' : 'Verify location';
+  }
+
+  Widget _headerDetail(IconData icon, String text) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: Colors.white),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              height: 1.4,
             ),
-            Text(
-              _eventType == AttendancePolicy.eventTypeInOut ? 'Time In / Time Out' : 'Continuous Stay Mode',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildEventHeader() => Container(
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      color: StudentUi.green,
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _eventType == AttendancePolicy.eventTypeInOut
+              ? 'CHECK IN / CHECK OUT'
+              : 'CONTINUOUS ATTENDANCE',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _eventTitle,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 25,
+            height: 1.2,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 6),
+        _headerDetail(
+          Icons.location_on_outlined,
+          widget.eventData['venueName']?.toString() ?? 'Event venue',
+        ),
+        if (widget.eventData['venueAddress']?.toString().trim().isNotEmpty ==
+            true)
+          Padding(
+            padding: const EdgeInsets.only(left: 28, top: 4),
+            child: Text(
+              widget.eventData['venueAddress'].toString(),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
             ),
-          ],
+          ),
+        _headerDetail(
+          Icons.calendar_today_outlined,
+          DateFormat('EEEE, MMM d, yyyy').format(_eventStartTimestamp.toDate()),
+        ),
+        _headerDetail(
+          Icons.schedule,
+          '${_formatTime(_eventStartTimestamp)} – ${_formatTime(_eventEndTimestamp)}',
+        ),
+      ],
+    ),
+  );
+
+  Widget _sectionHeading(IconData icon, String title) => Row(
+    children: [
+      Icon(icon, size: 21, color: StudentUi.green),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          title,
+          style: const TextStyle(
+            color: StudentUi.ink,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 30),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) unawaited(_rememberJoinedEvent());
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFEAF9F1),
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Back to dashboard',
+            onPressed: _backToDashboard,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          backgroundColor: StudentUi.green,
+          surfaceTintColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: const Text(
+            'Event attendance',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+          ),
+        ),
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: StudentUi.line)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(_statusIcon, color: _statusColor, size: 60),
-                  const SizedBox(height: 12),
-                  Text(
-                    _statusTitle,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: _statusColor,
+                  FilledButton.icon(
+                    onPressed: _isCheckingLocation || _attendanceFinalized
+                        ? null
+                        : () => _checkAndLogLocation(
+                            checkOutRequested:
+                                _eventType == AttendancePolicy.eventTypeInOut &&
+                                _timeIn != null,
+                          ),
+                    icon: Icon(
+                      _attendanceFinalized ? Icons.check : Icons.my_location,
+                      size: 20,
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      _statusSubtitle,
+                    label: Text(
+                      _verificationLabel,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: _darkText, fontSize: 14),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: StudentUi.green,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: const Color(0xFFEDF0EE),
+                      disabledForegroundColor: StudentUi.muted,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 16,
+                      ),
+                      textStyle: Theme.of(context).textTheme.labelLarge
+                          ?.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _backToDashboard,
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                    label: const Text('Back to dashboard'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: StudentUi.green,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
+          ),
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildEventHeader(),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: StudentTrackingStatus(
+                  title: _statusTitle,
+                  description: _statusSubtitle,
+                  icon: _statusIcon,
+                  color: _statusColor,
+                  checking: _isCheckingLocation,
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _eventTitle,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _darkText,
+              const SizedBox(height: 24),
+              _sectionHeading(Icons.map_outlined, 'Venue & location'),
+              const SizedBox(height: 12),
+              _buildLocationMap(),
+              const SizedBox(height: 12),
+              StudentSurface(
+                child: Column(
+                  children: [
+                    _buildDataRow(
+                      'Venue boundary',
+                      _isCheckingLocation
+                          ? 'Checking…'
+                          : _locationError != null || _currentPosition == null
+                          ? 'Unavailable'
+                          : _isInside
+                          ? 'Inside'
+                          : 'Outside',
+                      _isInside ? _primaryGreen : _darkText,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.location_on_outlined,
-                        color: _primaryGreen,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.eventData['venueName'] ?? '',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _darkText,
-                              ),
-                            ),
-                            Text(
-                              widget.eventData['venueAddress'] ?? '',
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(Icons.access_time, color: _primaryGreen, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${_formatTime(_eventStartTimestamp)} - ${_formatTime(_eventEndTimestamp)}',
-                        style: TextStyle(color: _darkText),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Location Status',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: _darkText,
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _isInside
-                                  ? Colors.green.shade50
-                                  : Colors.orange.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.circle,
-                                  size: 10,
-                                  color: _isInside
-                                      ? _primaryGreen
-                                      : Colors.orange,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _isInside ? 'Inside' : 'Outside',
-                                  style: TextStyle(
-                                    color: _isInside
-                                        ? _primaryGreen
-                                        : Colors.orange,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton.icon(
-                      onPressed: _isCheckingLocation || _attendanceFinalized ? null : _checkAndLogLocation,
-                      icon: const Icon(Icons.refresh, color: Colors.white),
-                      label: Text(
-                        _isCheckingLocation ? 'Checking...' : 'Refresh / Verify Location',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _primaryGreen,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
+                    const Divider(height: 20, color: StudentUi.line),
+                    _buildDataRow(
+                      'GPS accuracy',
+                      _formatAccuracy(_currentPosition),
+                      _darkText,
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  _buildLocationMap(),
-                  const SizedBox(height: 16),
-                  _buildDataRow(
-                    'Location Accuracy',
-                    _formatAccuracy(_currentPosition),
-                    _primaryGreen,
-                  ),
-                  const Divider(),
-                  _buildDataRow(
-                    'Distance from Event',
-                    _formatDistance(_distanceToVenueMeters),
-                    _darkText,
-                  ),
-                  const Divider(),
-                  _buildDataRow(
-                    'Checked In At',
-                    _timeIn != null ? _formatTime(_timeIn) : '--:--',
-                    _darkText,
-                  ),
-                  const Divider(),
-                  _buildDataRow(
-                    'Finished At',
-                    _timeOut != null ? _formatTime(_timeOut) : '--:--',
-                    _darkText,
-                  ),
-                ],
+                    const Divider(height: 20, color: StudentUi.line),
+                    _buildDataRow(
+                      'Distance to venue',
+                      _formatDistance(_distanceToVenueMeters),
+                      _darkText,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-          ],
+              const SizedBox(height: 24),
+              _sectionHeading(Icons.fact_check_outlined, 'Attendance record'),
+              const SizedBox(height: 12),
+              StudentSurface(
+                child: Column(
+                  children: [
+                    _buildDataRow(
+                      'Checked in',
+                      _timeIn != null
+                          ? _formatTime(_timeIn)
+                          : 'Not yet checked in',
+                      _darkText,
+                    ),
+                    const Divider(height: 20, color: StudentUi.line),
+                    _buildDataRow(
+                      'Checked out',
+                      _timeOut != null
+                          ? _formatTime(_timeOut)
+                          : 'Not yet checked out',
+                      _darkText,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
         ),
       ),
     );
@@ -929,7 +1008,12 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: StudentUi.muted, fontSize: 13),
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(

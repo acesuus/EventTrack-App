@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart' as fp;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,8 +14,15 @@ import 'package:table_calendar/table_calendar.dart';
 
 import 'attendance_policy.dart';
 import 'event_tracking_screen.dart';
+import 'joined_events_store.dart';
+import 'student_photo.dart';
+import 'widgets/student_avatar.dart';
+import 'widgets/eventtrack_brand.dart';
 import 'student_consent_screen.dart';
 import 'student_login_screen.dart';
+import 'widgets/student_ui.dart';
+import 'widgets/student_settings.dart';
+import 'widgets/student_profile_edit_dialog.dart';
 
 class StudentDashboardScreen extends StatefulWidget {
   final String studentId;
@@ -36,6 +44,13 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   final Color _primaryGreen = const Color(0xFF28A776);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
+
+  String? _profileName;
+  String? _profilePhoto;
+  bool _photoBusy = false;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+  _profileSubscription;
+  String get _displayName => _profileName ?? widget.studentName;
 
   int _selectedIndex = 0;
   Timer? _clockRefreshTimer;
@@ -61,11 +76,15 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         final String eventId = data['eventId'];
         final String eventName = data['eventName'];
         final String status = data['status'];
-        final int pointsAwarded = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+        final int pointsAwarded =
+            data['pointsAwarded'] ??
+            AttendancePolicy.getPointsForStatus(status);
         final String timestampStr = data['timestamp'];
 
-        final docRef = _firestore.collection('attendance').doc('${widget.studentId}_$eventId');
-        
+        final docRef = _firestore
+            .collection('attendance')
+            .doc('${widget.studentId}_$eventId');
+
         await docRef.set({
           'studentId': widget.studentId,
           'eventId': eventId,
@@ -88,7 +107,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sync failed. Please check your internet connection and try again.')),
+          const SnackBar(
+            content: Text(
+              'Sync failed. Please check your internet connection and try again.',
+            ),
+          ),
         );
         setState(() => _isOfflineMode = true);
       }
@@ -101,29 +124,49 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       try {
         final now = DateTime.now();
         final startOfDay = DateTime(now.year, now.month, now.day);
-        final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+        final endOfDay = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          23,
+          59,
+          59,
+          999,
+        );
 
         final snapshot = await _firestore
             .collection('events')
-            .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-            .where('startTime', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+            .where(
+              'startTime',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+            )
+            .where(
+              'startTime',
+              isLessThanOrEqualTo: Timestamp.fromDate(endOfDay),
+            )
             .get(const GetOptions(source: Source.server));
 
         List<Map<String, dynamic>> sanitizedEvents = [];
         for (var doc in snapshot.docs) {
           final data = doc.data();
           data['id'] = doc.id;
-          
+
           if (data['startTime'] is Timestamp) {
-            data['startTime'] = (data['startTime'] as Timestamp).toDate().toIso8601String();
+            data['startTime'] = (data['startTime'] as Timestamp)
+                .toDate()
+                .toIso8601String();
           }
           if (data['endTime'] is Timestamp) {
-            data['endTime'] = (data['endTime'] as Timestamp).toDate().toIso8601String();
+            data['endTime'] = (data['endTime'] as Timestamp)
+                .toDate()
+                .toIso8601String();
           }
           if (data['createdAt'] is Timestamp) {
-            data['createdAt'] = (data['createdAt'] as Timestamp).toDate().toIso8601String();
+            data['createdAt'] = (data['createdAt'] as Timestamp)
+                .toDate()
+                .toIso8601String();
           }
-          
+
           if (data['polygonPoints'] is List) {
             final points = data['polygonPoints'] as List<dynamic>;
             final sanitizedPoints = points.map((p) {
@@ -138,8 +181,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           sanitizedEvents.add(data);
         }
 
-        await prefs.setString('cached_today_events', jsonEncode(sanitizedEvents));
-
+        await prefs.setString(
+          'cached_today_events',
+          jsonEncode(sanitizedEvents),
+        );
       } catch (e) {
         debugPrint("Pre-load fetch failed: $e");
       }
@@ -147,7 +192,9 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       setState(() => _isOfflineMode = true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Data pre-loaded. App is now in Offline Mode."))
+          const SnackBar(
+            content: Text("Data pre-loaded. App is now in Offline Mode."),
+          ),
         );
       }
     } else {
@@ -156,14 +203,34 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       setState(() => _isOfflineMode = false);
       if (mounted && !_isOfflineMode) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("App is Online. Attendance synced."))
+          const SnackBar(content: Text("App is Online. Attendance synced.")),
         );
       }
     }
   }
+
   @override
   void initState() {
     super.initState();
+    _profileSubscription = _firestore
+        .collection('users')
+        .doc(widget.studentId)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            final photo = snapshot.data()?['photoBase64']?.toString();
+            if (mounted && photo != _profilePhoto) {
+              setState(() => _profilePhoto = photo);
+            }
+            final name = snapshot.data()?['name']?.toString().trim();
+            if (name != null && name.isNotEmpty) {
+              unawaited(_applyProfileName(name));
+            }
+          },
+          onError: (Object error) =>
+              debugPrint('Profile name sync is temporarily unavailable.'),
+        );
+    JoinedEventsStore.instance.load(widget.studentId);
     _syncStudentAttendanceLifecycle();
     _clockRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) {
@@ -175,6 +242,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
   @override
   void dispose() {
+    _profileSubscription?.cancel();
     _clockRefreshTimer?.cancel();
     super.dispose();
   }
@@ -316,36 +384,48 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     // 1. LOCAL BINDING (Anti-Clear Data protection for Offline Mode)
     final localBoundId = prefs.getString('bound_student_id');
     if (localBoundId != null && localBoundId != studentId) {
-      throw Exception('SECURITY_VIOLATION: This phone is permanently bound to Student ID: $localBoundId. Multiple accounts on one device are prohibited.');
+      throw Exception(
+        'SECURITY_VIOLATION: This phone is permanently bound to Student ID: $localBoundId. Multiple accounts on one device are prohibited.',
+      );
     }
 
     // 2. CLOUD BINDING (Cross-references Firestore to stop 1-device-to-many-accounts)
     DocumentSnapshot<Map<String, dynamic>>? userDoc;
     try {
-      userDoc = await userDocRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
+      userDoc = await userDocRef.get(
+        GetOptions(
+          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
+        ),
+      );
     } catch (e) {
-      if (_isOfflineMode) return; // Rely on the localBoundId check above if offline
+      if (_isOfflineMode)
+        return; // Rely on the localBoundId check above if offline
       rethrow;
     }
 
     // Helper function to claim the device in the cloud
     Future<void> claimDevice() async {
       if (_isOfflineMode) return; // Cannot claim a new device while offline
-      
+
       // Cloud Gatekeeper: Check if this physical phone is already owned by someone else!
-      final deviceCheck = await _firestore.collection('users')
+      final deviceCheck = await _firestore
+          .collection('users')
           .where('registeredDeviceId', isEqualTo: fingerprint)
           .get(const GetOptions(source: Source.server));
 
       if (deviceCheck.docs.isNotEmpty) {
         final ownerId = deviceCheck.docs.first.id;
         if (ownerId != studentId) {
-          throw Exception('SECURITY_VIOLATION: This physical phone is already permanently bound to Student ID: $ownerId. Proxy attendance is strictly prohibited.');
+          throw Exception(
+            'SECURITY_VIOLATION: This physical phone is already permanently bound to Student ID: $ownerId. Proxy attendance is strictly prohibited.',
+          );
         }
       }
-      
+
       // If clear, claim the device in the cloud and locally
-      await userDocRef.set({'registeredDeviceId': fingerprint}, SetOptions(merge: true));
+      await userDocRef.set({
+        'registeredDeviceId': fingerprint,
+      }, SetOptions(merge: true));
       await prefs.setString('bound_student_id', studentId);
     }
 
@@ -360,7 +440,9 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     if (cloudDeviceId == null || cloudDeviceId.toString().isEmpty) {
       await claimDevice();
     } else if (cloudDeviceId != fingerprint) {
-      throw Exception('SECURITY_VIOLATION: Identity mismatch. Your account is bound to a different physical device.');
+      throw Exception(
+        'SECURITY_VIOLATION: Identity mismatch. Your account is bound to a different physical device.',
+      );
     } else {
       // Success: Re-sync local storage in case they managed to clear app data but still passed the cloud check
       await prefs.setString('bound_student_id', studentId);
@@ -414,7 +496,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     DocumentSnapshot<Map<String, dynamic>>? existingAttendance;
 
     try {
-      existingAttendance = await attendanceRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
+      existingAttendance = await attendanceRef.get(
+        GetOptions(
+          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
+        ),
+      );
     } catch (e) {
       existingAttendance = null;
     }
@@ -427,7 +513,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         eventData: data,
         now: DateTime.now(),
       );
-      final refreshedAttendance = await attendanceRef.get(GetOptions(source: _isOfflineMode ? Source.cache : Source.serverAndCache));
+      final refreshedAttendance = await attendanceRef.get(
+        GetOptions(
+          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
+        ),
+      );
       final refreshedData = refreshedAttendance.data() ?? attendanceData;
       final existingRecord = AttendanceSessionRecord.fromFirestore(
         refreshedData,
@@ -462,20 +552,32 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       await Geolocator.getCurrentPosition();
     } catch (e) {
       if (!mounted) return;
-      
+
       final errorMessage = e.toString();
-      final displayMessage = errorMessage.contains('SECURITY_VIOLATION') 
-          ? errorMessage.replaceAll('Exception: ', '') 
+      final displayMessage = errorMessage.contains('SECURITY_VIOLATION')
+          ? errorMessage.replaceAll('Exception: ', '')
           : 'Failed to verify location. Please ensure GPS is enabled.';
-          
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(displayMessage)),
-      );
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(displayMessage)));
       return;
     }
 
     if (!mounted) return;
-    Navigator.push(
+    try {
+      await JoinedEventsStore.instance.join(widget.studentId, eventId);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save this event. Please try again.'),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => EventTrackingScreen(
@@ -677,7 +779,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('events').orderBy('startTime').snapshots(),
+            stream: _firestore
+                .collection('events')
+                .orderBy('startTime')
+                .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
@@ -710,7 +815,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                       firstDay: DateTime.utc(2020, 1, 1),
                       lastDay: DateTime.utc(2030, 12, 31),
                       focusedDay: _focusedDay,
-                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                      selectedDayPredicate: (day) =>
+                          isSameDay(_selectedDay, day),
                       calendarFormat: CalendarFormat.month,
                       availableCalendarFormats: const {
                         CalendarFormat.month: 'Month',
@@ -745,7 +851,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                         return allEvents.where((doc) {
                           var data = doc.data() as Map<String, dynamic>;
                           if (data['startTime'] == null) return false;
-                          DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+                          DateTime eventDate = (data['startTime'] as Timestamp)
+                              .toDate();
                           return isSameDay(eventDate, day);
                         }).toList();
                       },
@@ -765,12 +872,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                             itemBuilder: (context, index) {
                               final doc = filteredEvents[index];
                               final data = doc.data() as Map<String, dynamic>;
-                              final windowInfo = _getEventWindowInfo(data, DateTime.now());
-                              return _buildEventCard(
-                                doc.id,
+                              final windowInfo = _getEventWindowInfo(
                                 data,
-                                windowInfo,
+                                DateTime.now(),
                               );
+                              return _buildEventCard(doc.id, data, windowInfo);
                             },
                           ),
                   ),
@@ -816,13 +922,17 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           for (var doc in snapshot.data!.docs) {
             final data = doc.data() as Map<String, dynamic>;
             final status = data['status']?.toString() ?? 'Absent';
-            final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+            final pts =
+                data['pointsAwarded'] ??
+                AttendancePolicy.getPointsForStatus(status);
             totalPoints += (pts as num).toInt();
           }
         }
-        
+
         return InkWell(
-          onTap: () => setState(() { _selectedIndex = 2; }),
+          onTap: () => setState(() {
+            _selectedIndex = 2;
+          }),
           borderRadius: BorderRadius.circular(24),
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -871,7 +981,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                       const SizedBox(height: 4),
                       const Text(
                         'Tap to view breakdown ->',
-                        style: TextStyle(color: Colors.white, fontSize: 12, fontStyle: FontStyle.italic),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ],
                   ),
@@ -914,8 +1028,12 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               records.sort((a, b) {
                 final aData = a.data() as Map<String, dynamic>;
                 final bData = b.data() as Map<String, dynamic>;
-                final aTime = (aData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
-                final bTime = (bData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+                final aTime =
+                    (aData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ??
+                    0;
+                final bTime =
+                    (bData['timeIn'] as Timestamp?)?.millisecondsSinceEpoch ??
+                    0;
                 return bTime.compareTo(aTime);
               });
 
@@ -923,7 +1041,9 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               for (var doc in records) {
                 final data = doc.data() as Map<String, dynamic>;
                 final status = data['status']?.toString() ?? 'Absent';
-                final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+                final pts =
+                    data['pointsAwarded'] ??
+                    AttendancePolicy.getPointsForStatus(status);
                 totalPoints += (pts as num).toInt();
               }
 
@@ -949,7 +1069,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                       children: [
                         const Text(
                           'Total Points to Date',
-                          style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Text(
@@ -967,16 +1091,46 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: SizedBox(
-                        width: MediaQuery.of(context).size.width > 600 ? MediaQuery.of(context).size.width : 600,
+                        width: MediaQuery.of(context).size.width > 600
+                            ? MediaQuery.of(context).size.width
+                            : 600,
                         child: PaginatedDataTable(
-                          headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                          headingRowColor: WidgetStateProperty.all(
+                            Colors.grey.shade100,
+                          ),
                           dataRowMaxHeight: 60,
                           columns: const [
-                            DataColumn(label: Text('Event Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Event Type', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Date & Time', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Points', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                            DataColumn(
+                              label: Text(
+                                'Event Name',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            DataColumn(
+                              label: Text(
+                                'Event Type',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            DataColumn(
+                              label: Text(
+                                'Date & Time',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            DataColumn(
+                              label: Text(
+                                'Remarks',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            DataColumn(
+                              label: Text(
+                                'Points',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              numeric: true,
+                            ),
                           ],
                           source: _AttendanceDataSource(records),
                           rowsPerPage: 5,
@@ -996,70 +1150,103 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
-  Future<void> _showEditProfileDialog(String currentName, String currentEmail) async {
-    final TextEditingController nameCtrl = TextEditingController(text: currentName);
-    final TextEditingController emailCtrl = TextEditingController(text: currentEmail == 'No email saved' ? '' : currentEmail);
+  Future<void> _applyProfileName(String name) async {
+    if (!mounted) return;
+    if (name != _displayName) setState(() => _profileName = name);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted || name != _displayName) return;
+      if (prefs.getString('studentId') == widget.studentId &&
+          prefs.getString('studentName') != name) {
+        await prefs.setString('studentName', name);
+      }
+    } catch (_) {
+      debugPrint(
+        'Profile is saved; the local name cache could not be refreshed.',
+      );
+    }
+  }
 
-    showDialog(
+  Future<void> _showEditProfileDialog(
+    String currentName,
+    String currentEmail,
+  ) async {
+    final saved = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Profile'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Full Name'),
-              ),
-              TextFormField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'School Email'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final newName = nameCtrl.text.trim();
-                final newEmail = emailCtrl.text.trim();
-
-                if (newName.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name cannot be empty.')));
-                  return;
-                }
-
-                try {
-                  // Update both collections!
-                  await _firestore.collection('users').doc(widget.studentId).update({
-                    'name': newName,
-                    'email': newEmail,
-                  });
-
-                  await _firestore.collection('students').doc(widget.studentId).set({
-                    'studentId': widget.studentId,
-                    'name': newName,
-                    'email': newEmail,
-                  }, SetOptions(merge: true));
-
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully!')));
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      barrierDismissible: false,
+      builder: (_) => StudentProfileEditDialog(
+        name: currentName,
+        email: currentEmail == 'No email saved' ? '' : currentEmail,
+        studentId: widget.studentId,
+        onSave: (name, email) async {
+          // Update the personal profile; the official roster remains admin-managed.
+          await _firestore.collection('users').doc(widget.studentId).update({
+            'name': name,
+            'email': email,
+          });
+          await _applyProfileName(name);
+        },
+      ),
     );
+    if (!mounted || saved != true) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Profile updated.')));
+  }
+
+  Future<void> _updateProfilePhoto({bool remove = false}) async {
+    if (_photoBusy) return;
+    setState(() => _photoBusy = true);
+    try {
+      String? photo;
+      if (!remove) {
+        final selection = await fp.FilePicker.platform.pickFiles(
+          type: fp.FileType.image,
+          allowMultiple: false,
+          withData: true,
+        );
+        if (selection == null) return;
+        final file = selection.files.single;
+        if (file.size > StudentPhoto.maxSourceBytes) {
+          throw const FormatException('Choose an image smaller than 12 MB.');
+        }
+        final bytes =
+            file.bytes ??
+            (file.path == null ? null : await File(file.path!).readAsBytes());
+        if (bytes == null) {
+          throw const FormatException(
+            'Could not open this image. Choose another photo.',
+          );
+        }
+        photo = await StudentPhoto.prepare(bytes);
+      }
+      await _firestore.collection('users').doc(widget.studentId).update({
+        'photoBase64': remove ? FieldValue.delete() : photo,
+        'photoUpdatedAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      setState(() => _profilePhoto = photo);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            remove ? 'Profile photo removed.' : 'Profile photo updated.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is FormatException
+                ? error.message
+                : 'Could not update your photo. Please try again.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _photoBusy = false);
+    }
   }
 
   Widget _buildSettingsTab() {
@@ -1083,115 +1270,54 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               final deviceId =
                   userData['registeredDeviceId']?.toString() ??
                   'Not registered';
-              final email = userData['email']?.toString() ?? 'No email saved';
-              final name = userData['name']?.toString() ?? widget.studentName;
+              final rawEmail = userData['email']?.toString().trim() ?? '';
+              final email = rawEmail.contains('@')
+                  ? rawEmail
+                  : 'No email saved';
+              final name = userData['name']?.toString() ?? _displayName;
               final deviceProtected =
                   deviceId.isNotEmpty && deviceId != 'Not registered';
 
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-                children: [
-                  _buildSettingsCard(
-                    title: 'Student Account',
-                    icon: Icons.person_outline,
-                    children: [
-                      _buildSettingsRow('Name', name),
-                      _buildSettingsRow('Student ID', widget.studentId),
-                      _buildSettingsRow('School Email', email),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.edit, size: 18),
-                        label: const Text('Edit Profile'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: _primaryGreen,
-                          elevation: 0,
-                          side: BorderSide(color: Colors.grey.shade300),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () => _showEditProfileDialog(name, email),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSettingsCard(
-                    title: 'Privacy and Permissions',
-                    icon: Icons.privacy_tip_outlined,
-                    children: [
-                      _buildSettingsRow(
-                        'Privacy Notice',
-                        hasConsented ? 'Accepted' : 'Needs review',
-                      ),
-                      _buildSettingsRow(
-                        'Attendance Protection',
-                        deviceProtected
-                            ? 'This account is linked to your current device'
-                            : 'Device protection is not set yet',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildActionTile(
-                    icon: Icons.verified_user_outlined,
-                    title: 'Review Privacy Notice',
-                    subtitle:
-                        'Read the notice again and update your consent if needed',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => StudentConsentScreen(
-                            studentId: widget.studentId,
-                            studentName: widget.studentName,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildActionTile(
-                    icon: Icons.location_searching_outlined,
-                    title: 'Turn On Location',
-                    subtitle:
-                        'Open your phone location settings if attendance cannot verify where you are',
-                    onTap: () {
-                      Geolocator.openLocationSettings();
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildActionTile(
-                    icon: Icons.phone_android_outlined,
-                    title: 'Open App Permissions',
-                    subtitle:
-                        'Manage location access and other permissions for EventTrack',
-                    onTap: () {
-                      Geolocator.openAppSettings();
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: _handleLogout,
-                      icon: const Icon(Icons.logout, color: Colors.white),
-                      label: const Text(
-                        'Log Out',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade500,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !snapshot.hasData) {
+                return Center(
+                  child: CircularProgressIndicator(color: _primaryGreen),
+                );
+              }
+              if (snapshot.hasError && !snapshot.hasData) {
+                return _buildEmptyState(
+                  icon: Icons.cloud_off_outlined,
+                  title: 'Could not load your details',
+                  subtitle: 'Check your connection and open Settings again.',
+                );
+              }
+              return StudentSettingsContent(
+                name: name,
+                studentId: widget.studentId,
+                email: email,
+                program: userData['program']?.toString() ?? '',
+                yearBlock: userData['yearBlock']?.toString() ?? '',
+                hasConsented: hasConsented,
+                deviceProtected: deviceProtected,
+                photoBase64: userData['photoBase64']?.toString(),
+                photoBusy: _photoBusy,
+                onPhotoChange: () => _updateProfilePhoto(),
+                onPhotoRemove: () => _updateProfilePhoto(remove: true),
+                onEdit: () => _showEditProfileDialog(name, email),
+                onPrivacy: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => StudentConsentScreen(
+                        studentId: widget.studentId,
+                        studentName: name,
                       ),
                     ),
-                  ),
-                ],
+                  );
+                },
+                onLocation: () => Geolocator.openLocationSettings(),
+                onPermissions: () => Geolocator.openAppSettings(),
+                onLogout: _handleLogout,
               );
             },
           ),
@@ -1215,27 +1341,58 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Welcome Back!',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const EventTrackBrand(color: Colors.white, size: 24),
+                const SizedBox(height: 14),
+                const Text(
+                  'Welcome Back!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                widget.studentName,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-              Text(
-                'ID: ${widget.studentId}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    StudentAvatar(
+                      name: _displayName,
+                      photoBase64: _profilePhoto,
+                      size: 38,
+                      background: Colors.white,
+                      foreground: StudentUi.green,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _displayName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'ID: ${widget.studentId}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -1282,6 +1439,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const EventTrackBrand(color: Colors.white, size: 22),
+          const SizedBox(height: 14),
           Text(
             title,
             style: const TextStyle(
@@ -1334,7 +1493,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         for (final doc in allEvents) {
           final data = doc.data() as Map<String, dynamic>;
           if (data['startTime'] == null) continue;
-          
+
           final windowInfo = _getEventWindowInfo(data, now);
           final phase = windowInfo['phase'];
 
@@ -1422,6 +1581,96 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   }
 
   Widget _buildEventCard(
+    String eventId,
+    Map<String, dynamic> data,
+    Map<String, dynamic> windowInfo,
+  ) {
+    final isActive = windowInfo['isActive'] == true;
+    if (!isActive) return _buildScheduledEventCard(eventId, data, windowInfo);
+
+    return ListenableBuilder(
+      listenable: JoinedEventsStore.instance,
+      builder: (context, _) =>
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: _attendanceRefForEvent(eventId).snapshots(),
+            builder: (context, snapshot) {
+              AttendanceSessionRecord? attendanceRecord;
+              final attendanceData = snapshot.data?.data();
+              if (attendanceData != null) {
+                attendanceRecord = AttendanceSessionRecord.fromFirestore(
+                  attendanceData,
+                );
+                if (attendanceRecord.needsLegacyBootstrap) {
+                  final fallbackStart =
+                      attendanceData['timeIn'] as Timestamp? ??
+                      data['startTime'] as Timestamp? ??
+                      Timestamp.now();
+                  attendanceRecord = attendanceRecord.bootstrapLegacyIfNeeded(
+                    fallbackStart: fallbackStart,
+                  );
+                }
+              }
+
+              final hasActiveAttendance =
+                  attendanceRecord != null && !attendanceRecord.isFinalized;
+              final hasFinalizedAttendance =
+                  attendanceRecord?.isFinalized == true;
+              final hasJoinedEvent =
+                  hasActiveAttendance ||
+                  JoinedEventsStore.instance.contains(
+                    widget.studentId,
+                    eventId,
+                  );
+              final summaryStatus = attendanceRecord?.currentSummaryStatus;
+              final buttonLabel = !isActive
+                  ? windowInfo['buttonLabel'] as String
+                  : hasFinalizedAttendance
+                  ? 'Attendance Recorded'
+                  : hasJoinedEvent
+                  ? 'Resume Event'
+                  : 'Join Event';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: StudentEventCard(
+                  details: StudentEventDetails(
+                    title: data['title']?.toString() ?? 'Untitled event',
+                    venue:
+                        data['venueName']?.toString() ??
+                        'Venue to be announced',
+                    address: data['venueAddress']?.toString() ?? '',
+                    time:
+                        '${_formatTime(data['startTime'])} – ${_formatTime(data['endTime'])}',
+                    date: _formatDate(data['startTime']),
+                  ),
+                  status: hasFinalizedAttendance
+                      ? 'Attendance saved'
+                      : hasActiveAttendance
+                      ? 'Attendance in progress'
+                      : hasJoinedEvent
+                      ? 'Event joined'
+                      : windowInfo['bannerText'] as String,
+                  statusDetail: hasJoinedEvent && attendanceRecord == null
+                      ? 'Check in at the venue'
+                      : windowInfo['bannerSubtext'] as String?,
+                  isActive: isActive,
+                  buttonLabel: buttonLabel,
+                  onJoin: isActive && !hasFinalizedAttendance
+                      ? () => _joinEventWithOSPermission(eventId, data)
+                      : null,
+                  attendance: attendanceRecord == null
+                      ? null
+                      : _buildActiveAttendanceSummaryCard(
+                          attendanceRecord,
+                          summaryStatus ?? 'Recorded',
+                        ),
+                ),
+              );
+            },
+          ),
+    );
+  }
+
+  Widget _buildScheduledEventCard(
     String eventId,
     Map<String, dynamic> data,
     Map<String, dynamic> windowInfo,
@@ -1689,6 +1938,59 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
+  Widget _buildActiveAttendanceSummaryCard(
+    AttendanceSessionRecord record,
+    String summaryStatus,
+  ) {
+    final style = {
+      ..._getAttendanceStatusStyle(summaryStatus),
+      'color': summaryStatus.toLowerCase() == 'present'
+          ? _primaryGreen
+          : StudentUi.muted,
+    };
+    final displayStatus = _displayAttendanceStatus(summaryStatus);
+    final displayedOutsideSeconds = record.displayOutsideSecondsAt(
+      DateTime.now(),
+    );
+    final details = record.isFinalized
+        ? 'You already finished this event with $displayStatus. Time away: ${_formatDuration(displayedOutsideSeconds)}.'
+        : 'Your attendance is still active. Time away so far: ${_formatDuration(displayedOutsideSeconds)}.';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            style['icon'] as IconData,
+            color: style['color'] as Color,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  record.isFinalized
+                      ? 'Attendance saved'
+                      : 'Attendance in progress',
+                  style: TextStyle(
+                    color: style['color'] as Color,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(details, style: TextStyle(color: _darkText, fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAttendanceSummaryCard(
     AttendanceSessionRecord record,
     String summaryStatus,
@@ -1791,117 +2093,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
-  Widget _buildSettingsCard({
-    required String title,
-    required IconData icon,
-    required List<Widget> children,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: _primaryGreen),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  color: _darkText,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          ...children,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSettingsRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(color: _darkText, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _lightGreenBg,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: _primaryGreen),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: _darkText,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildEmptyState({
     required IconData icon,
     required String title,
@@ -1972,11 +2163,11 @@ class _AttendanceDataSource extends DataTableSource {
   @override
   DataRow? getRow(int index) {
     if (index >= docs.length) return null;
-    
+
     final doc = docs[index];
     final data = doc.data() as Map<String, dynamic>;
     final eventName = data['eventName'] ?? data['eventTitle'] ?? 'Legacy Event';
-    
+
     String eventTypeStr = 'Standard';
     final type = data['eventType'];
     if (type == 'type1_in_out') {
@@ -1984,10 +2175,12 @@ class _AttendanceDataSource extends DataTableSource {
     } else if (type == 'type2_continuous') {
       eventTypeStr = 'Continuous';
     }
-    
+
     final timeIn = data['timeIn'] as Timestamp?;
-    final dateStr = timeIn != null ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate()) : 'Unknown';
-    
+    final dateStr = timeIn != null
+        ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate())
+        : 'Unknown';
+
     final status = data['status']?.toString() ?? 'Absent';
     Color statusColor = Colors.red;
     if (status == 'Present') {
@@ -1995,16 +2188,29 @@ class _AttendanceDataSource extends DataTableSource {
     } else if (status == 'Late' || status == 'Partial') {
       statusColor = Colors.orange;
     }
-    
-    final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
-    
-    return DataRow(cells: [
-      DataCell(Text(eventName)),
-      DataCell(Text(eventTypeStr)),
-      DataCell(Text(dateStr)),
-      DataCell(Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold))),
-      DataCell(Text('+$pts pts', style: const TextStyle(fontWeight: FontWeight.bold))),
-    ]);
+
+    final pts =
+        data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+
+    return DataRow(
+      cells: [
+        DataCell(Text(eventName)),
+        DataCell(Text(eventTypeStr)),
+        DataCell(Text(dateStr)),
+        DataCell(
+          Text(
+            status,
+            style: TextStyle(color: statusColor, fontWeight: FontWeight.bold),
+          ),
+        ),
+        DataCell(
+          Text(
+            '+$pts pts',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
   }
 
   @override

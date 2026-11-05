@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_dashboard.dart';
+import 'admin_auth_screen.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -10,7 +10,7 @@ void main() async {
   
   runApp(const MaterialApp(
     title: 'EventTrack Admin',
-    home: AdminDashboardScreen(),
+    home: AdminAuthGate(),
     debugShowCheckedModeBanner: false,
   ));
 }

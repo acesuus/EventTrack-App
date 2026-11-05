@@ -8,93 +8,62 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import 'attendance_policy.dart';
+import 'widgets/export_events_dialog.dart';
 
 class ExportUtils {
-  static Future<void> showExportDialog(BuildContext context, Color primaryGreen) async {
+  static Future<void> showExportDialog(
+    BuildContext context,
+    Color primaryGreen,
+  ) async {
+    final pageContext = context;
     final firestore = FirebaseFirestore.instance;
     final snapshot = await firestore.collection('events').get();
-    
+
     if (snapshot.docs.isEmpty) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No events found.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No events found.')));
       return;
     }
 
-    List<String> selectedEventIds = [];
-
     if (!context.mounted) return;
-    showDialog(
+    final selection = await showDialog<ExportSelection>(
       context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Export Event Reports'),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: snapshot.docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = snapshot.docs[index];
-                    final eventId = doc.id;
-                    final title = doc['title'] ?? 'Unknown Event';
-                    final isSelected = selectedEventIds.contains(eventId);
-
-                    return CheckboxListTile(
-                      title: Text(title),
-                      value: isSelected,
-                      onChanged: (bool? value) {
-                        setState(() {
-                          if (value == true) {
-                            selectedEventIds.add(eventId);
-                          } else {
-                            selectedEventIds.remove(eventId);
-                          }
-                        });
-                      },
-                    );
-                  },
-                ),
+      builder: (_) => ExportEventsDialog(
+        primaryColor: primaryGreen,
+        events: snapshot.docs
+            .map(
+              (doc) => ExportEventOption(
+                id: doc.id,
+                title: doc.data()['title']?.toString() ?? 'Untitled event',
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: selectedEventIds.isEmpty ? null : () {
-                    Navigator.pop(dialogContext);
-                    _generateAndShareCSV(dialogContext, selectedEventIds);
-                  },
-                  child: const Text('Generate CSV'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryGreen,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: selectedEventIds.isEmpty ? null : () {
-                    Navigator.pop(dialogContext);
-                    _generateAndSharePDF(dialogContext, selectedEventIds);
-                  },
-                  child: const Text('Generate PDF'),
-                ),
-              ],
-            );
-          }
-        );
-      },
+            )
+            .toList(),
+      ),
     );
+
+    if (selection == null || !pageContext.mounted) return;
+    switch (selection.format) {
+      case ReportFormat.csv:
+        await _generateAndShareCSV(pageContext, selection.eventIds);
+      case ReportFormat.pdf:
+        await _generateAndSharePDF(pageContext, selection.eventIds);
+    }
   }
 
-  static Future<void> _generateAndShareCSV(BuildContext context, List<String> selectedEventIds) async {
+  static Future<void> _generateAndShareCSV(
+    BuildContext context,
+    List<String> selectedEventIds,
+  ) async {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating CSV...')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Generating CSV...')));
 
     try {
       final firestore = FirebaseFirestore.instance;
-      
+
       final studentsSnapshot = await firestore.collection('students').get();
       Map<String, Map<String, dynamic>> studentsMap = {};
       for (var doc in studentsSnapshot.docs) {
@@ -102,12 +71,24 @@ class ExportUtils {
       }
 
       List<List<dynamic>> csvData = [
-        ['Event Name', 'Student ID', 'Student Name', 'Program', 'Year & Block', 'Status', 'Points', 'Time In']
+        [
+          'Event Name',
+          'Student ID',
+          'Student Name',
+          'Program',
+          'Year & Block',
+          'Status',
+          'Points',
+          'Time In',
+        ],
       ];
 
       for (String eventId in selectedEventIds) {
-        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
-        
+        final attendanceSnapshot = await firestore
+            .collection('attendance')
+            .where('eventId', isEqualTo: eventId)
+            .get();
+
         Map<String, dynamic> eventAttendanceMap = {};
         for (var doc in attendanceSnapshot.docs) {
           final attData = doc.data();
@@ -118,19 +99,26 @@ class ExportUtils {
 
         studentsMap.forEach((studentId, studentData) {
           String rawId = studentId.replaceAll('-', '');
-          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
-          
+          var attendanceRecord =
+              eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
+
           if (attendanceRecord != null) {
             String timeInStr = '';
             if (attendanceRecord['timeIn'] is Timestamp) {
-              timeInStr = (attendanceRecord['timeIn'] as Timestamp).toDate().toIso8601String();
+              timeInStr = (attendanceRecord['timeIn'] as Timestamp)
+                  .toDate()
+                  .toIso8601String();
             }
 
             final status = attendanceRecord['status']?.toString() ?? 'Present';
-            final pts = attendanceRecord['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+            final pts =
+                attendanceRecord['pointsAwarded'] ??
+                AttendancePolicy.getPointsForStatus(status);
 
             csvData.add([
-              attendanceRecord['eventName'] ?? attendanceRecord['eventTitle'] ?? 'Event',
+              attendanceRecord['eventName'] ??
+                  attendanceRecord['eventTitle'] ??
+                  'Event',
               studentId,
               studentData['name'] ?? '',
               studentData['program'] ?? '',
@@ -158,24 +146,33 @@ class ExportUtils {
       String csvOutput = const csv_pkg.ListToCsvConverter().convert(csvData);
 
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.csv');
+      final file = File(
+        '${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.csv',
+      );
       await file.writeAsString(csvOutput);
 
       await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report');
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating CSV: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error generating CSV: $e')));
       }
     }
   }
 
-  static Future<void> _generateAndSharePDF(BuildContext context, List<String> selectedEventIds) async {
+  static Future<void> _generateAndSharePDF(
+    BuildContext context,
+    List<String> selectedEventIds,
+  ) async {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF...')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Generating PDF...')));
 
     try {
       final firestore = FirebaseFirestore.instance;
-      
+
       final studentsSnapshot = await firestore.collection('students').get();
       Map<String, Map<String, dynamic>> studentsMap = {};
       for (var doc in studentsSnapshot.docs) {
@@ -185,11 +182,17 @@ class ExportUtils {
       final pdf = pw.Document();
 
       for (String eventId in selectedEventIds) {
-        final eventDoc = await firestore.collection('events').doc(eventId).get();
+        final eventDoc = await firestore
+            .collection('events')
+            .doc(eventId)
+            .get();
         final eventName = eventDoc.data()?['title'] ?? 'Event';
-        
-        final attendanceSnapshot = await firestore.collection('attendance').where('eventId', isEqualTo: eventId).get();
-        
+
+        final attendanceSnapshot = await firestore
+            .collection('attendance')
+            .where('eventId', isEqualTo: eventId)
+            .get();
+
         Map<String, dynamic> eventAttendanceMap = {};
         for (var doc in attendanceSnapshot.docs) {
           final attData = doc.data();
@@ -199,22 +202,34 @@ class ExportUtils {
         }
 
         List<List<String>> tableData = [
-          ['Student ID', 'Name', 'Program', 'Year/Block', 'Status', 'Points', 'Time In']
+          [
+            'Student ID',
+            'Name',
+            'Program',
+            'Year/Block',
+            'Status',
+            'Points',
+            'Time In',
+          ],
         ];
 
         studentsMap.forEach((studentId, studentData) {
           String rawId = studentId.replaceAll('-', '');
-          var attendanceRecord = eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
-          
+          var attendanceRecord =
+              eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
+
           if (attendanceRecord != null) {
             String timeInStr = '';
             if (attendanceRecord['timeIn'] is Timestamp) {
               final date = (attendanceRecord['timeIn'] as Timestamp).toDate();
-              timeInStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+              timeInStr =
+                  '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
             }
 
             final status = attendanceRecord['status']?.toString() ?? 'Present';
-            final pts = attendanceRecord['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+            final pts =
+                attendanceRecord['pointsAwarded'] ??
+                AttendancePolicy.getPointsForStatus(status);
 
             tableData.add([
               studentId,
@@ -247,14 +262,25 @@ class ExportUtils {
               return [
                 pw.Header(
                   level: 0,
-                  child: pw.Text('Attendance Report: $eventName', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                  child: pw.Text(
+                    'Attendance Report: $eventName',
+                    style: pw.TextStyle(
+                      fontSize: 24,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
                 ),
                 pw.SizedBox(height: 10),
                 pw.TableHelper.fromTextArray(
                   context: context,
                   data: tableData,
-                  headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
-                  headerDecoration: const pw.BoxDecoration(color: PdfColors.green800),
+                  headerStyle: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.white,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.green800,
+                  ),
                   cellAlignment: pw.Alignment.centerLeft,
                   cellPadding: const pw.EdgeInsets.all(5),
                 ),
@@ -265,13 +291,19 @@ class ExportUtils {
       }
 
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      final file = File(
+        '${dir.path}/Attendance_Report_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
       await file.writeAsBytes(await pdf.save());
 
-      await Share.shareXFiles([XFile(file.path)], text: 'Attendance Report (PDF)');
+      await Share.shareXFiles([
+        XFile(file.path),
+      ], text: 'Attendance Report (PDF)');
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
       }
     }
   }

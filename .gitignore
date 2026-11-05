@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase CLI cache and private administrator password setup links.
+.firebase/
+
+# Database snapshots include personal data and authentication hashes.
+firebase-backups/
+
+# Local chat screenshots and attachments are not application assets.
+.codex-attachments/

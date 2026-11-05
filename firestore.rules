@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
+    match /students/{studentId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 1. USERS (Device Binding)
+    match /users/{userId} {
+      allow read: if true;
+      // Only allow creation/updates if it includes a device ID.
+      allow write: if request.resource.data.keys().hasAny(['registeredDeviceId', 'studentId']);
+    }
+
+    // 2. EVENTS
+    match /events/{eventId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 3. ATTENDANCE (The Most Secure Collection)
+    match /attendance/{docId} {
+      allow read: if true;
+
+      // CREATION: A student can only check in if they provide their ID and a Time In.
+      allow create: if request.resource.data.keys().hasAll(['studentId', 'eventId', 'status', 'timeIn']);
+
+      // UPDATE: If a student leaves early (Partial), they are ONLY allowed to update the 'timeOut' and 'status'.
+      // They are strictly FORBIDDEN from altering their original 'timeIn'.
+      allow update: if isAdmin() || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['timeOut', 'status']);
+
+      // DELETION: Students can NEVER delete an attendance record to hide that they were late or partial.
+      allow delete: if false;
+    }
+  }
+}

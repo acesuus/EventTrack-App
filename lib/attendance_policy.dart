@@ -46,6 +46,34 @@ class AttendancePolicy {
     return !isFinalizedRecord(timeOut);
   }
 
+  /// Opening or resuming an event verifies attendance without checking out.
+  static Map<String, dynamic> verifyInOutAttendance({
+    required Map<String, dynamic> existing,
+    required Timestamp verifiedAt,
+    required DateTime eventStart,
+    required bool isInside,
+    bool checkOutRequested = false,
+    int lateCutoffMinutes = defaultLateCutoffMinutes,
+  }) {
+    final data = Map<String, dynamic>.from(existing);
+    if (data['timeOut'] != null || !isInside) return data;
+    if (data['timeIn'] == null) {
+      final status = determineInitialStatus(
+        checkInTime: verifiedAt.toDate(),
+        eventStart: eventStart,
+        lateCutoffMinutes: lateCutoffMinutes,
+      );
+      data.addAll({
+        'timeIn': verifiedAt,
+        'status': status,
+        'initialStatus': status,
+      });
+    } else if (checkOutRequested) {
+      data['timeOut'] = verifiedAt;
+    }
+    return data;
+  }
+
   static bool shouldAutoFinalize({
     required Timestamp? timeOut,
     required DateTime eventEnd,
@@ -115,7 +143,9 @@ class AttendanceSessionRecord {
 
     return AttendanceSessionRecord(
       schemaVersion: (data?['schemaVersion'] as num?)?.toInt() ?? 1,
-      eventType: data?['eventType']?.toString() ?? AttendancePolicy.eventTypeContinuous,
+      eventType:
+          data?['eventType']?.toString() ??
+          AttendancePolicy.eventTypeContinuous,
       initialStatus: data?['initialStatus']?.toString() ?? status,
       status: status,
       timeIn: data?['timeIn'] as Timestamp?,

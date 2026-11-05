@@ -1,17 +1,15 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:csv/csv.dart' as csv_pkg;
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:share_plus/share_plus.dart';
 
 import 'attendance_monitoring_screen.dart';
 import 'export_utils.dart';
 import 'manage_events_screen.dart';
+import 'widgets/app_data_dialog.dart';
 
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
@@ -34,25 +32,28 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   Future<void> _showImportInstructions() async {
     final proceed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Icon(Icons.info_outline, color: Colors.blue.shade700),
-            const SizedBox(width: 8),
-            const Text('Import Instructions'),
-          ],
-        ),
+      builder: (context) => AppDataDialog(
+        title: 'Import Student List',
+        icon: Icons.upload_file_outlined,
+        subtitle: 'Prepare your CSV file before importing student records.',
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Your CSV file must have these columns in this exact order:'),
+              const Text(
+                'Your CSV file must have these columns in this exact order:',
+              ),
               const SizedBox(height: 12),
               Table(
-                border: TableBorder.all(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
-                columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+                border: TableBorder.all(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                columnWidths: const {
+                  0: IntrinsicColumnWidth(),
+                  1: FlexColumnWidth(),
+                },
                 children: [
                   _instructionRow('Col', 'Field (Example)', isHeader: true),
                   _instructionRow('A', 'Student ID (2021-1-00123)'),
@@ -67,15 +68,25 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 '• Student ID may be written with or without dashes.\n'
                 '• Year & Block must start with the year level (1-4), e.g. 3-B.\n'
                 '• Existing students with the same ID will be updated.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.5),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade700,
+                  height: 1.5,
+                ),
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryGreen,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Choose CSV File'),
           ),
@@ -89,12 +100,24 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   }
 
   TableRow _instructionRow(String col, String field, {bool isHeader = false}) {
-    final style = TextStyle(fontSize: 13, fontWeight: isHeader ? FontWeight.bold : FontWeight.normal, color: _darkText);
+    final style = TextStyle(
+      fontSize: 13,
+      fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
+      color: _darkText,
+    );
     return TableRow(
-      decoration: isHeader ? BoxDecoration(color: Colors.blue.withValues(alpha: 0.08)) : null,
+      decoration: isHeader
+          ? BoxDecoration(color: _primaryGreen.withValues(alpha: 0.08))
+          : null,
       children: [
-        Padding(padding: const EdgeInsets.all(8), child: Text(col, style: style)),
-        Padding(padding: const EdgeInsets.all(8), child: Text(field, style: style)),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(col, style: style),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(field, style: style),
+        ),
       ],
     );
   }
@@ -107,17 +130,25 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
 
     if (result != null && result.files.single.path != null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Importing students...')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Importing students...')));
 
       try {
         final File file = File(result.files.single.path!);
         final String rawCsvString = await file.readAsString();
         final String safeCsvString = rawCsvString.replaceAll('\r\n', '\n');
-        final List<List<dynamic>> csvTable = const csv_pkg.CsvToListConverter(eol: '\n').convert(safeCsvString);
+        final List<List<dynamic>> csvTable = const csv_pkg.CsvToListConverter(
+          eol: '\n',
+        ).convert(safeCsvString);
 
         if (csvTable.length <= 1) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('CSV is empty or only contains headers.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('CSV is empty or only contains headers.'),
+            ),
+          );
           return;
         }
 
@@ -130,9 +161,15 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           final row = csvTable[i];
           if (row.isEmpty || row[0].toString().trim().isEmpty) continue;
 
-          String rawId = row[0].toString().replaceAll('-', '').replaceAll(' ', '').trim();
-          String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
-          
+          String rawId = row[0]
+              .toString()
+              .replaceAll('-', '')
+              .replaceAll(' ', '')
+              .trim();
+          String finalId = rawId.length == 9
+              ? '${rawId.substring(0, 4)}-${rawId.substring(4, 5)}-${rawId.substring(5)}'
+              : rawId;
+
           final docRef = firestore.collection('students').doc(finalId);
           final data = {
             'studentId': finalId,
@@ -157,16 +194,21 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         }
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Successfully imported $totalImported students!')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Successfully imported $totalImported students!'),
+            ),
+          );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error importing CSV: $e')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error importing CSV: $e')));
         }
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -202,8 +244,18 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       title: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Settings', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-          Text('Admin preferences', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(
+            'Settings',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            'Admin preferences',
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
         ],
       ),
     );
@@ -216,7 +268,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Row(
@@ -227,18 +283,43 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               color: _primaryGreen,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.shield_outlined, color: Colors.white, size: 30),
+            child: const Icon(
+              Icons.shield_outlined,
+              color: Colors.white,
+              size: 30,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Jon Richmond Vitug', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _darkText)),
+                Text(
+                  FirebaseAuth.instance.currentUser?.displayName ??
+                      'Administrator',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _darkText,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('admin@psu.edu.ph', style: TextStyle(fontSize: 14, color: _darkText.withValues(alpha: 0.7))),
+                Text(
+                  FirebaseAuth.instance.currentUser?.email ?? '',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: _darkText.withValues(alpha: 0.7),
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('Administrator', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _primaryGreen)),
+                Text(
+                  'Administrator',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _primaryGreen,
+                  ),
+                ),
               ],
             ),
           ),
@@ -254,7 +335,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -264,7 +349,14 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             children: [
               Icon(Icons.settings_outlined, color: _primaryGreen, size: 20),
               const SizedBox(width: 8),
-              Text('Preferences', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
+              Text(
+                'Preferences',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _darkText,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -288,7 +380,13 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
-  Widget _buildToggleRow({required IconData icon, required String title, required String subtitle, required bool value, required Function(bool) onChanged}) {
+  Widget _buildToggleRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required Function(bool) onChanged,
+  }) {
     return Row(
       children: [
         Icon(icon, color: _darkText.withValues(alpha: 0.6), size: 24),
@@ -297,8 +395,18 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _darkText)),
-              Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: _darkText,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -319,7 +427,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     final TextEditingController miCtrl = TextEditingController();
     final TextEditingController lastNameCtrl = TextEditingController();
     final TextEditingController idCtrl = TextEditingController();
-    
+
     String program = 'BSCS';
     String yearBlock = '';
 
@@ -328,19 +436,27 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Add Student Manually'),
+            return AppDataDialog(
+              title: 'Add Student Manually',
+              icon: Icons.person_add_alt_1_outlined,
+              subtitle: 'Add a student to the official roster.',
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 16,
                   children: [
                     TextFormField(
                       controller: firstNameCtrl,
-                      decoration: const InputDecoration(labelText: 'First Name'),
+                      decoration: const InputDecoration(
+                        labelText: 'First Name',
+                      ),
                     ),
                     TextFormField(
                       controller: miCtrl,
-                      decoration: const InputDecoration(labelText: 'Middle Initial (Optional)'),
+                      decoration: const InputDecoration(
+                        labelText: 'Middle Initial (Optional)',
+                      ),
                     ),
                     TextFormField(
                       controller: lastNameCtrl,
@@ -349,16 +465,24 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                     TextFormField(
                       controller: idCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Student ID'),
+                      decoration: const InputDecoration(
+                        labelText: 'Student ID',
+                      ),
                     ),
                     DropdownButtonFormField<String>(
                       initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
-                      items: ['BSCS', 'BSIT', 'BSIS'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                      items: ['BSCS', 'BSIT', 'BSIS']
+                          .map(
+                            (p) => DropdownMenuItem(value: p, child: Text(p)),
+                          )
+                          .toList(),
                       onChanged: (val) => setState(() => program = val!),
                     ),
                     TextFormField(
-                      decoration: const InputDecoration(labelText: 'Year & Block (e.g., 1-A)'),
+                      decoration: const InputDecoration(
+                        labelText: 'Year & Block (e.g., 1-A)',
+                      ),
                       onChanged: (val) => yearBlock = val,
                     ),
                   ],
@@ -372,35 +496,55 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     String rawId = idCtrl.text.replaceAll('-', '').trim();
-                    if (rawId.isEmpty || firstNameCtrl.text.isEmpty || lastNameCtrl.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill required fields.')));
+                    if (rawId.isEmpty ||
+                        firstNameCtrl.text.isEmpty ||
+                        lastNameCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please fill required fields.'),
+                        ),
+                      );
                       return;
                     }
-                    String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
-                    
-                    String fullName = [firstNameCtrl.text.trim(), miCtrl.text.trim(), lastNameCtrl.text.trim()]
-                        .where((s) => s.isNotEmpty)
-                        .join(' ');
+                    String finalId = rawId.length == 9
+                        ? '${rawId.substring(0, 4)}-${rawId.substring(4, 5)}-${rawId.substring(5)}'
+                        : rawId;
+
+                    String fullName = [
+                      firstNameCtrl.text.trim(),
+                      miCtrl.text.trim(),
+                      lastNameCtrl.text.trim(),
+                    ].where((s) => s.isNotEmpty).join(' ');
 
                     try {
-                      await FirebaseFirestore.instance.collection('students').doc(finalId).set({
-                        'studentId': finalId,
-                        'name': fullName,
-                        'program': program,
-                        'yearBlock': yearBlock,
-                      });
-                      if (!mounted) return;
+                      await FirebaseFirestore.instance
+                          .collection('students')
+                          .doc(finalId)
+                          .set({
+                            'studentId': finalId,
+                            'name': fullName,
+                            'program': program,
+                            'yearBlock': yearBlock,
+                          });
+                      if (!context.mounted) return;
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student added successfully.')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Student added successfully.'),
+                        ),
+                      );
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
                     }
                   },
                   child: const Text('Save'),
                 ),
               ],
             );
-          }
+          },
         );
       },
     );
@@ -412,12 +556,15 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Student Details'),
+        return AppDataDialog(
+          title: 'Edit Student Details',
+          icon: Icons.person_search_outlined,
+          subtitle: 'Find a student using their Student ID.',
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 16,
             children: [
-              const Text('Enter the Student ID to fetch their details.'),
               TextFormField(
                 controller: idCtrl,
                 keyboardType: TextInputType.number,
@@ -434,19 +581,31 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               onPressed: () async {
                 String rawId = idCtrl.text.replaceAll('-', '').trim();
                 if (rawId.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a Student ID.')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter a Student ID.')),
+                  );
                   return;
                 }
-                String finalId = rawId.length == 9 ? '${rawId.substring(0,4)}-${rawId.substring(4,5)}-${rawId.substring(5)}' : rawId;
-                
-                final doc = await FirebaseFirestore.instance.collection('students').doc(finalId).get();
-                if (!mounted) return;
-                
+                String finalId = rawId.length == 9
+                    ? '${rawId.substring(0, 4)}-${rawId.substring(4, 5)}-${rawId.substring(5)}'
+                    : rawId;
+
+                final doc = await FirebaseFirestore.instance
+                    .collection('students')
+                    .doc(finalId)
+                    .get();
+                if (!context.mounted) return;
+
                 if (doc.exists) {
                   Navigator.pop(context); // Close the fetch dialog
-                  _showUpdateStudentForm(finalId, doc.data() as Map<String, dynamic>);
+                  _showUpdateStudentForm(
+                    finalId,
+                    doc.data() as Map<String, dynamic>,
+                  );
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student not found.')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Student not found.')),
+                  );
                 }
               },
               child: const Text('Fetch'),
@@ -457,10 +616,17 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
-  void _showUpdateStudentForm(String studentId, Map<String, dynamic> existingData) {
-    final TextEditingController nameCtrl = TextEditingController(text: existingData['name'] ?? '');
+  void _showUpdateStudentForm(
+    String studentId,
+    Map<String, dynamic> existingData,
+  ) {
+    final TextEditingController nameCtrl = TextEditingController(
+      text: existingData['name'] ?? '',
+    );
     String program = existingData['program'] ?? 'BSCS';
-    final TextEditingController yearBlockCtrl = TextEditingController(text: existingData['yearBlock'] ?? '');
+    final TextEditingController yearBlockCtrl = TextEditingController(
+      text: existingData['yearBlock'] ?? '',
+    );
 
     if (!['BSCS', 'BSIT', 'BSIS'].contains(program)) {
       program = 'BSCS'; // Fallback
@@ -471,11 +637,15 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
-              title: Text('Edit $studentId'),
+            return AppDataDialog(
+              title: 'Edit Student Details',
+              icon: Icons.manage_accounts_outlined,
+              subtitle: 'Update the roster record for $studentId.',
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 16,
                   children: [
                     TextFormField(
                       controller: nameCtrl,
@@ -484,12 +654,18 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                     DropdownButtonFormField<String>(
                       initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
-                      items: ['BSCS', 'BSIT', 'BSIS'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                      items: ['BSCS', 'BSIT', 'BSIS']
+                          .map(
+                            (p) => DropdownMenuItem(value: p, child: Text(p)),
+                          )
+                          .toList(),
                       onChanged: (val) => setState(() => program = val!),
                     ),
                     TextFormField(
                       controller: yearBlockCtrl,
-                      decoration: const InputDecoration(labelText: 'Year & Block (e.g., 1-A)'),
+                      decoration: const InputDecoration(
+                        labelText: 'Year & Block (e.g., 1-A)',
+                      ),
                     ),
                   ],
                 ),
@@ -502,28 +678,40 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     if (nameCtrl.text.trim().isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name is required.')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Name is required.')),
+                      );
                       return;
                     }
-                    
+
                     try {
-                      await FirebaseFirestore.instance.collection('students').doc(studentId).update({
-                        'name': nameCtrl.text.trim(),
-                        'program': program,
-                        'yearBlock': yearBlockCtrl.text.trim(),
-                      });
-                      if (!mounted) return;
+                      await FirebaseFirestore.instance
+                          .collection('students')
+                          .doc(studentId)
+                          .update({
+                            'name': nameCtrl.text.trim(),
+                            'program': program,
+                            'yearBlock': yearBlockCtrl.text.trim(),
+                          });
+                      if (!context.mounted) return;
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Student updated successfully.')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Student updated successfully.'),
+                        ),
+                      );
                     } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
                     }
                   },
                   child: const Text('Update'),
                 ),
               ],
             );
-          }
+          },
         );
       },
     );
@@ -536,13 +724,24 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Data Management', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
+          Text(
+            'Data Management',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: _darkText,
+            ),
+          ),
           const SizedBox(height: 16),
           _buildActionButton(
             label: 'Export Event Reports',
@@ -554,9 +753,9 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           const SizedBox(height: 12),
           _buildActionButton(
             label: 'Import Student List',
-            textColor: Colors.blue.shade700,
-            bgColor: Colors.blue.withValues(alpha: 0.1),
-            borderColor: Colors.blue.withValues(alpha: 0.3),
+            textColor: _primaryGreen,
+            bgColor: _primaryGreen.withValues(alpha: 0.1),
+            borderColor: _primaryGreen.withValues(alpha: 0.3),
             onTap: _showImportInstructions,
           ),
           const SizedBox(height: 12),
@@ -580,7 +779,13 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
-  Widget _buildActionButton({required String label, required Color textColor, required Color bgColor, required Color borderColor, required VoidCallback onTap}) {
+  Widget _buildActionButton({
+    required String label,
+    required Color textColor,
+    required Color bgColor,
+    required Color borderColor,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -595,7 +800,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         child: Center(
           child: Text(
             label,
-            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14),
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
           ),
         ),
       ),
@@ -607,16 +816,27 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       width: double.infinity,
       height: 54,
       child: ElevatedButton(
-        onPressed: () {
-          // Logic to sign out and return to login screen goes here
-          Navigator.of(context).popUntil((route) => route.isFirst);
+        onPressed: () async {
+          final navigator = Navigator.of(context);
+          await FirebaseAuth.instance.signOut();
+          if (!context.mounted) return;
+          navigator.popUntil((route) => route.isFirst);
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.red.shade600,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           elevation: 0,
         ),
-        child: const Text('Log Out', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        child: const Text(
+          'Log Out',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
     );
   }
@@ -632,15 +852,36 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
         if (index == 0) {
           Navigator.pop(context); // Go back to Dashboard
         } else if (index == 1) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const ManageEventsScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const ManageEventsScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         } else if (index == 2) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const AttendanceMonitoringScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const AttendanceMonitoringScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         }
       },
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-        BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Events'),
-        BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined), label: 'Reports'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.dashboard_outlined),
+          label: 'Dashboard',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_today),
+          label: 'Events',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.insert_chart_outlined),
+          label: 'Reports',
+        ),
         BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
       ],
     );
