@@ -209,7 +209,7 @@ class _AttendanceMonitoringScreenState
                 .orderBy('startTime', descending: true)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.hasError)
+              if (snapshot.hasError) {
                 return const Padding(
                   padding: EdgeInsets.all(20),
                   child: Center(
@@ -220,10 +220,12 @@ class _AttendanceMonitoringScreenState
                     ),
                   ),
                 );
-              if (!snapshot.hasData)
+              }
+              if (!snapshot.hasData) {
                 return const Center(
                   child: CircularProgressIndicator(color: Colors.white),
                 );
+              }
 
               var events = snapshot.data!.docs;
 
@@ -295,7 +297,7 @@ class _AttendanceMonitoringScreenState
           .where('eventId', isEqualTo: _selectedEventId)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError)
+        if (snapshot.hasError) {
           return const Padding(
             padding: EdgeInsets.all(20),
             child: Center(
@@ -305,6 +307,7 @@ class _AttendanceMonitoringScreenState
               ),
             ),
           );
+        }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -347,10 +350,11 @@ class _AttendanceMonitoringScreenState
             totalTurnout++;
             if (status == 'Present') {
               present++;
-            } else if (status == 'Late')
+            } else if (status == 'Late') {
               late++;
-            else if (status == 'Partial')
+            } else if (status == 'Partial') {
               partial++;
+            }
           } else {
             combinedItem['status'] = 'Absent';
             combinedItem['timeIn'] = null;

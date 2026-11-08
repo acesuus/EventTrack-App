@@ -56,7 +56,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                   _instructionRow('Col', 'Field (Example)', isHeader: true),
                   _instructionRow('A', 'Student ID (0000-0-0000)'),
                   _instructionRow('B', 'Full Name (Juan D. Cruz)'),
-                  _instructionRow('C', 'Program (BSCS, BSIT, BSIS)'),
+                  _instructionRow('C', 'Program (BSCS, BSIT)'),
                   _instructionRow('D', 'Year & Block (1-A)'),
                   _instructionRow(
                     'E',
@@ -393,7 +393,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                     DropdownButtonFormField<String>(
                       initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
-                      items: ['BSCS', 'BSIT', 'BSIS']
+                      items: ['BSCS', 'BSIT']
                           .map(
                             (p) => DropdownMenuItem(value: p, child: Text(p)),
                           )
@@ -609,7 +609,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       text: existingData['email'] ?? '',
     );
 
-    if (!['BSCS', 'BSIT', 'BSIS'].contains(program)) {
+    if (!['BSCS', 'BSIT'].contains(program)) {
       program = 'BSCS'; // Fallback
     }
 
@@ -635,7 +635,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                     DropdownButtonFormField<String>(
                       initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
-                      items: ['BSCS', 'BSIT', 'BSIS']
+                      items: ['BSCS', 'BSIT']
                           .map(
                             (p) => DropdownMenuItem(value: p, child: Text(p)),
                           )

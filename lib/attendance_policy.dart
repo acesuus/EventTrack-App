@@ -223,9 +223,7 @@ class AttendancePolicy {
 
     // If no inside reading was saved for a while (app closed, phone off),
     // the student left when the last reading went stale.
-    final staleAt = lastSeen == null
-        ? null
-        : lastSeen.toDate().add(
+    final staleAt = lastSeen?.toDate().add(
             const Duration(seconds: heartbeatToleranceSeconds),
           );
     final wentStale =

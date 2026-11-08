@@ -469,7 +469,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .orderBy('startTime')
                   .snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError)
+                if (snapshot.hasError) {
                   return const Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
@@ -479,6 +479,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                     ),
                   );
+                }
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Padding(
                     padding: EdgeInsets.all(20.0),

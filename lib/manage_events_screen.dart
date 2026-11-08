@@ -42,7 +42,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
             .orderBy('startTime', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError)
+          if (snapshot.hasError) {
             return const Padding(
               padding: EdgeInsets.all(20),
               child: Center(
@@ -52,6 +52,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                 ),
               ),
             );
+          }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
