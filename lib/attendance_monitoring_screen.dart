@@ -64,7 +64,8 @@ class _AttendanceMonitoringScreenState
 
   Future<void> _fetchRoster() async {
     try {
-      final snapshot = await _firestore.collection('students').get();
+      // Every student who has logged in has a profile in `users`.
+      final snapshot = await _firestore.collection('users').get();
       final Map<String, dynamic> tempRoster = {};
       for (var doc in snapshot.docs) {
         tempRoster[doc.id] = doc.data();
@@ -329,7 +330,13 @@ class _AttendanceMonitoringScreenState
         int late = 0;
         int partial = 0;
 
-        rosterCache.forEach((studentId, studentData) {
+        // Also count check-ins from students without a saved profile.
+        final roster = <String, dynamic>{
+          ...rosterCache,
+          for (final id in liveAttendance.keys)
+            if (!rosterCache.containsKey(id)) id: const <String, dynamic>{},
+        };
+        roster.forEach((studentId, studentData) {
           Map<String, dynamic> combinedItem = {
             'studentId': studentId,
             'name': studentData['name'] ?? 'Unknown',
@@ -365,7 +372,7 @@ class _AttendanceMonitoringScreenState
         });
 
         // Calculate Stats based on roster and live attendance
-        int rosterTotal = rosterCache.length;
+        int rosterTotal = roster.length;
         double turnoutPercentage = rosterTotal == 0
             ? 0.0
             : (totalTurnout / rosterTotal) * 100;

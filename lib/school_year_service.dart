@@ -78,9 +78,9 @@ class SchoolYearService {
   }
 
   /// Increments the year level in each student's `yearBlock` (e.g. "1-A" -> "2-A").
-  /// Students who go past [maxYearLevel] have graduated and are removed from the list.
+  /// Students who go past [maxYearLevel] have graduated and their profile is removed.
   static Future<({int promoted, int graduated})> _promoteStudents(int yearsElapsed) async {
-    final students = await _firestore.collection('students').get();
+    final students = await _firestore.collection('users').get();
     WriteBatch batch = _firestore.batch();
     int batchCount = 0;
     int promoted = 0;

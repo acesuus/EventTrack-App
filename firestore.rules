@@ -21,12 +21,6 @@ service cloud.firestore {
         && studentId.replace('-', '') + '@psu.palawan.edu.ph' == request.auth.token.email;
     }
 
-    // ROSTER (optional, for names): admins manage it; a student can read only their own row.
-    match /students/{studentId} {
-      allow read: if isAdmin() || ownsStudent(studentId);
-      allow write: if isAdmin();
-    }
-
     match /settings/{settingId} {
       allow read, write: if isAdmin();
     }

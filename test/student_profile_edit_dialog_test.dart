@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget host(
-  Future<void> Function(String) save, {
+  Future<void> Function(String, String, String) save, {
   ValueChanged<bool?>? result,
 }) => MaterialApp(
   home: Scaffold(
@@ -18,6 +18,8 @@ Widget host(
             builder: (_) => StudentProfileEditDialog(
               name: 'Kert',
               email: 'kert@psu.palawan.edu.ph',
+              program: 'BSIT',
+              yearBlock: '3-A',
               studentId: '202380358',
               onSave: save,
             ),
@@ -44,7 +46,7 @@ void main() {
   testWidgets('school email shows the login email and is read-only', (
     tester,
   ) async {
-    await open(tester, host((name) async {}));
+    await open(tester, host((name, program, yearBlock) async {}));
     final field = find.byKey(const Key('profile-email'));
     expect(
       find.descendant(
@@ -63,16 +65,24 @@ void main() {
     );
   });
 
-  testWidgets('empty name shows a field error without saving', (tester) async {
-    var calls = 0;
-    await open(tester, host((name) async => calls++));
-    await tester.enterText(find.byKey(const Key('profile-name')), '  ');
-    await tester.tap(find.text('Save changes'));
-    await tester.pumpAndSettle();
-    expect(find.text('Enter your full name.'), findsOneWidget);
-    expect(calls, 0);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'invalid name and year & block show field errors without saving',
+    (tester) async {
+      var calls = 0;
+      await open(tester, host((name, program, yearBlock) async => calls++));
+      await tester.enterText(find.byKey(const Key('profile-name')), '  ');
+      await tester.enterText(find.byKey(const Key('profile-year-block')), '5A');
+      await tester.tap(find.text('Save changes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter your full name.'), findsOneWidget);
+      expect(
+        find.text('Use year 1-4, a dash, then your block, e.g. 1-A.'),
+        findsOneWidget,
+      );
+      expect(calls, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'waits for save, blocks duplicates, and returns trimmed updated details',
@@ -80,18 +90,26 @@ void main() {
       final pending = Completer<void>();
       var calls = 0;
       String? savedName;
+      String? savedProgram;
+      String? savedYearBlock;
       bool? result;
       await open(
         tester,
-        host((name) async {
+        host((name, program, yearBlock) async {
           calls++;
           savedName = name;
+          savedProgram = program;
+          savedYearBlock = yearBlock;
           await pending.future;
         }, result: (value) => result = value),
       );
       await tester.enterText(
         find.byKey(const Key('profile-name')),
         '  Kert Dela Cruz  ',
+      );
+      await tester.enterText(
+        find.byKey(const Key('profile-year-block')),
+        ' 2-b ',
       );
       await tester.tap(find.text('Save changes'));
       await tester.pump();
@@ -111,6 +129,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(result, isTrue);
       expect(savedName, 'Kert Dela Cruz');
+      expect(savedProgram, 'BSIT');
+      expect(savedYearBlock, '2-B');
       expect(calls, 1);
       expect(find.byType(StudentProfileEditDialog), findsNothing);
     },
@@ -120,7 +140,7 @@ void main() {
     var calls = 0;
     await open(
       tester,
-      host((name) async {
+      host((name, program, yearBlock) async {
         calls++;
         if (calls == 1) throw StateError('offline');
       }),

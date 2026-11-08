@@ -64,7 +64,8 @@ class ExportUtils {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      final studentsSnapshot = await firestore.collection('students').get();
+      // Every student who has logged in has a profile in `users`.
+      final studentsSnapshot = await firestore.collection('users').get();
       Map<String, Map<String, dynamic>> studentsMap = {};
       for (var doc in studentsSnapshot.docs) {
         studentsMap[doc.id] = doc.data();
@@ -84,6 +85,12 @@ class ExportUtils {
       ];
 
       for (String eventId in selectedEventIds) {
+        final eventDoc = await firestore
+            .collection('events')
+            .doc(eventId)
+            .get();
+        final eventName = eventDoc.data()?['title'] ?? 'Event';
+
         final attendanceSnapshot = await firestore
             .collection('attendance')
             .where('eventId', isEqualTo: eventId)
@@ -97,7 +104,13 @@ class ExportUtils {
           }
         }
 
-        studentsMap.forEach((studentId, studentData) {
+        // Also include check-ins from students without a saved profile.
+        final eventStudents = <String, Map<String, dynamic>>{
+          ...studentsMap,
+          for (final id in eventAttendanceMap.keys)
+            if (!studentsMap.containsKey(id)) id: const <String, dynamic>{},
+        };
+        eventStudents.forEach((studentId, studentData) {
           String rawId = studentId.replaceAll('-', '');
           var attendanceRecord =
               eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];
@@ -116,9 +129,7 @@ class ExportUtils {
                 AttendancePolicy.getPointsForStatus(status);
 
             csvData.add([
-              attendanceRecord['eventName'] ??
-                  attendanceRecord['eventTitle'] ??
-                  'Event',
+              eventName,
               studentId,
               studentData['name'] ?? '',
               studentData['program'] ?? '',
@@ -130,7 +141,7 @@ class ExportUtils {
           } else {
             // Include absent students
             csvData.add([
-              'Event', // We don't have the event name per row here, but we can leave it generic or fetch it
+              eventName,
               studentId,
               studentData['name'] ?? '',
               studentData['program'] ?? '',
@@ -173,7 +184,8 @@ class ExportUtils {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      final studentsSnapshot = await firestore.collection('students').get();
+      // Every student who has logged in has a profile in `users`.
+      final studentsSnapshot = await firestore.collection('users').get();
       Map<String, Map<String, dynamic>> studentsMap = {};
       for (var doc in studentsSnapshot.docs) {
         studentsMap[doc.id] = doc.data();
@@ -213,7 +225,13 @@ class ExportUtils {
           ],
         ];
 
-        studentsMap.forEach((studentId, studentData) {
+        // Also include check-ins from students without a saved profile.
+        final eventStudents = <String, Map<String, dynamic>>{
+          ...studentsMap,
+          for (final id in eventAttendanceMap.keys)
+            if (!studentsMap.containsKey(id)) id: const <String, dynamic>{},
+        };
+        eventStudents.forEach((studentId, studentData) {
           String rawId = studentId.replaceAll('-', '');
           var attendanceRecord =
               eventAttendanceMap[studentId] ?? eventAttendanceMap[rawId];

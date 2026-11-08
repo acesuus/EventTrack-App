@@ -6,16 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'device_binding.dart';
 import 'student_consent_screen.dart';
 import 'student_dashboard.dart';
+import 'student_profile.dart';
 import 'widgets/eventtrack_brand.dart';
-
-final _psuEmail = RegExp(r'^(\d{4})(\d)(\d{4})@psu\.palawan\.edu\.ph$');
-
-/// `202312345@psu.palawan.edu.ph` -> `2023-1-2345`, or null for any other email.
-/// Must match `studentIdMatchesEmail` in firestore.rules.
-String? studentIdFromEmail(String email) {
-  final m = _psuEmail.firstMatch(email.trim().toLowerCase());
-  return m == null ? null : '${m[1]}-${m[2]}-${m[3]}';
-}
 
 /// Students sign in with their PSU student email.
 /// First-time users activate an account, verify their email, then log in.
@@ -105,8 +97,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       );
       return;
     }
-    if (_isActivating &&
-        _passwordController.text != _confirmController.text) {
+    if (_isActivating && _passwordController.text != _confirmController.text) {
       _showMessage('Passwords do not match.');
       return;
     }
@@ -166,15 +157,6 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
 
     // The student ID comes from the email digits, in 0000-0-0000 format.
     final studentId = studentIdFromEmail(_email)!;
-    // Optional: use the name from the admin's roster if this student is on it.
-    var rosterName = '';
-    try {
-      final roster = await _firestore.collection('students').doc(studentId).get();
-      rosterName = roster.data()?['name']?.toString() ?? '';
-    } on FirebaseException catch (e) {
-      debugPrint('Roster lookup skipped: ${e.code}');
-    }
-
     try {
       await DeviceBinding.bind(studentId);
     } on DeviceBindingException catch (e) {
@@ -189,9 +171,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         {};
     final hasConsented = userData['hasConsented'] == true;
     final savedName = userData['name']?.toString().trim() ?? '';
-    final name = savedName.isNotEmpty
-        ? savedName
-        : (rosterName.isNotEmpty ? rosterName : 'Student');
+    final name = savedName.isNotEmpty ? savedName : 'Student';
 
     await _saveLoginSession(studentId, name, hasConsented);
     if (!mounted) return;
@@ -457,9 +437,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                                   ),
                                 )
                               : Text(
-                                  _isActivating
-                                      ? 'Create account'
-                                      : 'Log in',
+                                  _isActivating ? 'Create account' : 'Log in',
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,

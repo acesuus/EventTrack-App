@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../student_profile.dart';
 import 'student_ui.dart';
 
 class StudentProfileEditDialog extends StatefulWidget {
@@ -9,12 +10,17 @@ class StudentProfileEditDialog extends StatefulWidget {
     required this.email,
     required this.studentId,
     required this.onSave,
+    this.program = '',
+    this.yearBlock = '',
   });
 
   final String name;
   final String email;
   final String studentId;
-  final Future<void> Function(String name) onSave;
+  final String program;
+  final String yearBlock;
+  final Future<void> Function(String name, String program, String yearBlock)
+  onSave;
 
   @override
   State<StudentProfileEditDialog> createState() =>
@@ -24,12 +30,17 @@ class StudentProfileEditDialog extends StatefulWidget {
 class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
   final _form = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.name);
+  late final _yearBlock = TextEditingController(text: widget.yearBlock);
+  late String? _program = studentPrograms.contains(widget.program)
+      ? widget.program
+      : null;
   bool _saving = false;
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
+    _yearBlock.dispose();
     super.dispose();
   }
 
@@ -41,7 +52,11 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
       _error = null;
     });
     try {
-      await widget.onSave(_name.text.trim());
+      await widget.onSave(
+        _name.text.trim(),
+        _program!,
+        normalizeYearBlock(_yearBlock.text)!,
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (_) {
@@ -147,7 +162,7 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Keep your name and contact details up to date.',
+                        'Keep your name, program, and year & block up to date.',
                         style: TextStyle(
                           color: StudentUi.muted,
                           fontSize: 13,
@@ -188,6 +203,44 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
                             value == null || value.trim().isEmpty
                             ? 'Enter your full name.'
                             : null,
+                      ),
+                      const SizedBox(height: 20),
+                      _label('Program'),
+                      DropdownButtonFormField<String>(
+                        key: const Key('profile-program'),
+                        isExpanded: true,
+                        initialValue: _program,
+                        decoration: _decoration(
+                          'Choose your program',
+                          Icons.school_outlined,
+                        ),
+                        items: [
+                          for (final p in studentPrograms)
+                            DropdownMenuItem(value: p, child: Text(p)),
+                        ],
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(() => _program = value),
+                        validator: (value) =>
+                            value == null ? 'Choose your program.' : null,
+                      ),
+                      const SizedBox(height: 20),
+                      _label('Year & block'),
+                      TextFormField(
+                        key: const Key('profile-year-block'),
+                        controller: _yearBlock,
+                        enabled: !_saving,
+                        textCapitalization: TextCapitalization.characters,
+                        textInputAction: TextInputAction.done,
+                        decoration: _decoration(
+                          'e.g. 1-A',
+                          Icons.groups_outlined,
+                        ),
+                        validator: (value) =>
+                            normalizeYearBlock(value ?? '') == null
+                            ? 'Use year 1-4, a dash, then your block, e.g. 1-A.'
+                            : null,
+                        onFieldSubmitted: (_) => _save(),
                       ),
                       const SizedBox(height: 20),
                       _label('School email'),
