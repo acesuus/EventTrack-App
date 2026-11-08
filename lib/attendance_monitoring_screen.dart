@@ -4,7 +4,11 @@ import 'package:intl/intl.dart';
 import 'manage_events_screen.dart';
 import 'admin_settings_screen.dart';
 class AttendanceMonitoringScreen extends StatefulWidget {
-  const AttendanceMonitoringScreen({super.key});
+  const AttendanceMonitoringScreen({super.key, this.initialEventId, this.initialEventData});
+
+  /// Event to show first, e.g. when opened from an event card.
+  final String? initialEventId;
+  final Map<String, dynamic>? initialEventData;
 
   @override
   State<AttendanceMonitoringScreen> createState() => _AttendanceMonitoringScreenState();
@@ -14,7 +18,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Theme Colors
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -46,6 +50,8 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
   @override
   void initState() {
     super.initState();
+    _selectedEventId = widget.initialEventId;
+    _selectedEventData = widget.initialEventData;
     _fetchRoster();
   }
 
@@ -106,7 +112,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           _buildHeader(),
           Expanded(
             child: _selectedEventId == null
-                ? const Center(child: Text("Please select an event to monitor.", style: TextStyle(color: Colors.grey)))
+                ? const Center(child: Text("Please select an event to monitor.", style: TextStyle(color: Color(0xFF616161))))
                 : _buildLiveDashboard(),
           ),
         ],
@@ -126,28 +132,23 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
+                  IconButton(
+                    tooltip: 'Back',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
                   ),
-                  const SizedBox(width: 8),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Attendance Monitoring', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text('Real-time attendance tracking', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text('Real-time attendance tracking', style: TextStyle(color: Colors.white, fontSize: 12)),
                     ],
                   ),
                 ],
               ),
-              IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.white),
-                onPressed: () => setState(() {}), // Force refresh
-              )
             ],
           ),
           const SizedBox(height: 20),
@@ -156,6 +157,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           StreamBuilder<QuerySnapshot>(
             stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white))));
               if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.white));
               
               var events = snapshot.data!.docs;
@@ -215,6 +217,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
       // Listen to attendance collection strictly for the selected event
       stream: _firestore.collection('attendance').where('eventId', isEqualTo: _selectedEventId).snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -323,7 +326,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Total Turnout', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              const Text('Total Turnout', style: TextStyle(color: Colors.white, fontSize: 12)),
                               const SizedBox(height: 4),
                               Text('${turnoutPercentage.toStringAsFixed(1)}%', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                             ],
@@ -331,7 +334,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              const Text('Checked In', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              const Text('Checked In', style: TextStyle(color: Colors.white, fontSize: 12)),
                               const SizedBox(height: 4),
                               Text('$totalTurnout / $rosterTotal', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                             ],
@@ -369,6 +372,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
+                      tooltip: 'Previous page',
                       icon: const Icon(Icons.chevron_left),
                       onPressed: currentPage > 0
                           ? () => setState(() => currentPage--)
@@ -376,6 +380,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                     ),
                     Text('Page ${currentPage + 1} of $totalPages', style: TextStyle(fontWeight: FontWeight.bold, color: _darkText)),
                     IconButton(
+                      tooltip: 'Next page',
                       icon: const Icon(Icons.chevron_right),
                       onPressed: currentPage < totalPages - 1
                           ? () => setState(() => currentPage++)
@@ -481,7 +486,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           },
           decoration: InputDecoration(
             hintText: 'Search by ID...',
-            prefixIcon: const Icon(Icons.search, color: Colors.grey),
+            prefixIcon: const Icon(Icons.search, color: Color(0xFF616161)),
             filled: true,
             fillColor: Colors.white,
             contentPadding: const EdgeInsets.symmetric(vertical: 0),
@@ -553,7 +558,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                       : (status == 'Partial' 
                           ? 'In: ${_formatTime(data['timeIn'])} • Out: ${_formatTime(data['timeOut'])}'
                           : 'In: ${_formatTime(data['timeIn'])}'),
-                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                  style: const TextStyle(color: Color(0xFF616161), fontSize: 11),
                 ),
               ],
             ),
@@ -586,11 +591,11 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
       type: BottomNavigationBarType.fixed,
       currentIndex: _selectedIndex,
       selectedItemColor: _primaryGreen,
-      unselectedItemColor: Colors.grey,
+      unselectedItemColor: Color(0xFF616161),
       onTap: (index) {
         if (index == 2) return; // Already on this tab
         if (index == 0) {
-          Navigator.pop(context); // Go back to Dashboard
+          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
         } else if (index == 1) {
           Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const ManageEventsScreen(), transitionDuration: Duration.zero));
         } else if (index == 3) {

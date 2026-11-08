@@ -41,7 +41,7 @@ class StudentDashboardScreen extends StatefulWidget {
 class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -249,7 +249,37 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
   Future<void> _handleLogout() async {
     final prefs = await SharedPreferences.getInstance();
+    final hasUnsynced =
+        (prefs.getString('offline_attendance_queue') ?? '').isNotEmpty;
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log out?'),
+        content: Text(
+          hasUnsynced
+              ? 'You have attendance records saved offline that have not synced yet. They will stay on this phone and sync after you log back in.'
+              : 'You will need to log in again to track attendance.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    // Only clear the session; keep the offline attendance queue so records are never lost.
+    final queue = prefs.getString('offline_attendance_queue');
     await prefs.clear();
+    if (queue != null) {
+      await prefs.setString('offline_attendance_queue', queue);
+    }
     if (!mounted) return;
 
     Navigator.of(context).pushAndRemoveUntil(
@@ -784,6 +814,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 .orderBy('startTime')
                 .snapshots(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) return _buildLoadErrorState();
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: Padding(
@@ -863,7 +894,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                         ? const Center(
                             child: Text(
                               'No events scheduled for this date.',
-                              style: TextStyle(color: Colors.grey),
+                              style: TextStyle(color: Color(0xFF616161)),
                             ),
                           )
                         : ListView.builder(
@@ -967,7 +998,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     children: [
                       const Text(
                         'CS Association Points',
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                        style: TextStyle(color: Colors.white, fontSize: 14),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -1012,6 +1043,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 .where('studentId', isEqualTo: widget.studentId)
                 .snapshots(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) return _buildLoadErrorState();
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -1070,7 +1102,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                         const Text(
                           'Total Points to Date',
                           style: TextStyle(
-                            color: Colors.grey,
+                            color: Color(0xFF616161),
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1405,18 +1437,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                 onPressed: () => _toggleOfflineMode(!_isOfflineMode),
                 tooltip: _isOfflineMode ? 'Go Online' : 'Go Offline',
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.settings_outlined, color: Colors.white),
-                onPressed: () => setState(() => _selectedIndex = 3),
-                constraints: const BoxConstraints(),
-                padding: const EdgeInsets.all(4),
-              ),
               IconButton(
                 icon: const Icon(Icons.logout, color: Colors.white),
                 onPressed: _handleLogout,
-                constraints: const BoxConstraints(),
-                padding: const EdgeInsets.all(4),
+                tooltip: 'Log out',
               ),
             ],
           ),
@@ -1452,7 +1476,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
+            style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
         ],
       ),
@@ -1463,6 +1487,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('events').orderBy('startTime').snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) return _buildLoadErrorState();
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: Padding(
@@ -1480,7 +1505,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               padding: EdgeInsets.all(20.0),
               child: Text(
                 'No active events at PSU Main Campus',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(color: Color(0xFF616161)),
               ),
             ),
           );
@@ -1518,7 +1543,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               padding: EdgeInsets.all(20.0),
               child: Text(
                 'No upcoming or active events.',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(color: Color(0xFF616161)),
               ),
             ),
           );
@@ -1761,7 +1786,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                         isActive ? 'You can check in now' : 'Available later',
                         style: const TextStyle(
                           fontSize: 12,
-                          color: Colors.grey,
+                          color: Color(0xFF616161),
                         ),
                       ),
                     ],
@@ -1811,7 +1836,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                               Text(
                                 data['venueAddress'] ?? '',
                                 style: const TextStyle(
-                                  color: Colors.grey,
+                                  color: Color(0xFF616161),
                                   fontSize: 12,
                                 ),
                               ),
@@ -1888,7 +1913,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                             Text(
                               windowInfo['bannerSubtext'] as String,
                               style: const TextStyle(
-                                color: Colors.grey,
+                                color: Color(0xFF616161),
                                 fontSize: 11,
                               ),
                             ),
@@ -2085,13 +2110,19 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               'Review your past event check-ins',
               style: TextStyle(fontSize: 12),
             ),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            trailing: const Icon(Icons.chevron_right, color: Color(0xFF616161)),
             onTap: () => setState(() => _selectedIndex = 2),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildLoadErrorState() => _buildEmptyState(
+    icon: Icons.cloud_off,
+    title: "Couldn't load data",
+    subtitle: 'Check your internet connection. This will update automatically when you are back online.',
+  );
 
   Widget _buildEmptyState({
     required IconData icon,
@@ -2104,7 +2135,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 60, color: Colors.grey.shade400),
+            Icon(icon, size: 60, color: Colors.grey.shade600),
             const SizedBox(height: 16),
             Text(
               title,
@@ -2118,7 +2149,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
             const SizedBox(height: 8),
             Text(
               subtitle,
-              style: const TextStyle(color: Colors.grey),
+              style: const TextStyle(color: Color(0xFF616161)),
               textAlign: TextAlign.center,
             ),
           ],
@@ -2132,7 +2163,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       type: BottomNavigationBarType.fixed,
       currentIndex: _selectedIndex,
       selectedItemColor: _primaryGreen,
-      unselectedItemColor: Colors.grey,
+      unselectedItemColor: Color(0xFF616161),
       onTap: (index) => setState(() => _selectedIndex = index),
       items: const [
         BottomNavigationBarItem(
@@ -2182,11 +2213,11 @@ class _AttendanceDataSource extends DataTableSource {
         : 'Unknown';
 
     final status = data['status']?.toString() ?? 'Absent';
-    Color statusColor = Colors.red;
+    Color statusColor = Colors.red.shade700;
     if (status == 'Present') {
-      statusColor = Colors.green;
+      statusColor = Colors.green.shade800;
     } else if (status == 'Late' || status == 'Partial') {
-      statusColor = Colors.orange;
+      statusColor = Colors.orange.shade900;
     }
 
     final pts =

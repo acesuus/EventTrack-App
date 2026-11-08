@@ -22,10 +22,21 @@ class StudentConsentScreen extends StatefulWidget {
 
 class _StudentConsentScreenState extends State<StudentConsentScreen> {
   bool _isAgreed = false;
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
+
+  bool _isSubmitting = false;
 
   Future<void> _requestPermissions() async {
-    if (!_isAgreed) return;
+    if (!_isAgreed || _isSubmitting) return;
+    setState(() => _isSubmitting = true);
+    try {
+      await _grantAndContinue();
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _grantAndContinue() async {
 
     // 1. Check OS permissions
     // 1. Check if location services are enabled
@@ -61,7 +72,11 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Location permissions are permanently denied. Please enable in settings.'),
+            content: Text('Location permission is turned off for EventTrack. Turn it on in Settings to continue.'),
+            action: SnackBarAction(
+              label: 'Open Settings',
+              onPressed: Geolocator.openAppSettings,
+            ),
           ),
         );
         return;
@@ -105,7 +120,7 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
         backgroundColor: _primaryGreen,
         foregroundColor: Colors.white,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,7 +128,7 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
             const Icon(
               Icons.privacy_tip_outlined,
               size: 60,
-              color: Color(0xFF28A776),
+              color: Color(0xFF1E7F5A),
             ),
             const SizedBox(height: 20),
             const Text(
@@ -136,37 +151,41 @@ class _StudentConsentScreenState extends State<StudentConsentScreen> {
               'Auto-Deactivation',
               'GPS tracking stops the exact minute the event ends.',
             ),
-            const Spacer(),
-            Row(
-              children: [
-                Checkbox(
-                  value: _isAgreed,
-                  activeColor: _primaryGreen,
-                  onChanged: (val) => setState(() => _isAgreed = val ?? false),
-                ),
-                const Expanded(
-                  child: Text(
-                    'I have read and agree to allow EventTrack to verify my location for attendance.',
-                  ),
-                ),
-              ],
+            const SizedBox(height: 16),
+            CheckboxListTile(
+              value: _isAgreed,
+              activeColor: _primaryGreen,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              onChanged: (val) => setState(() => _isAgreed = val ?? false),
+              title: const Text(
+                'I have read and agree to allow EventTrack to verify my location for attendance.',
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: _isAgreed ? _requestPermissions : null,
+                onPressed: _isAgreed && !_isSubmitting ? _requestPermissions : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryGreen,
+                  foregroundColor: Colors.white,
+                  disabledForegroundColor: Color(0xFF616161),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  'Grant Permission & Continue',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
-                ),
+                child: _isSubmitting
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text(
+                        'Grant Permission & Continue',
+                        style: TextStyle(fontSize: 16),
+                      ),
               ),
             ),
           ],

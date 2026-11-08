@@ -17,7 +17,7 @@ class AppDataDialog extends StatelessWidget {
   final Widget content;
   final List<Widget> actions;
 
-  static const green = Color(0xFF28A776);
+  static const green = Color(0xFF1E7F5A);
   static const paleGreen = Color(0xFFEAF9F1);
   static const darkText = Color(0xFF0C2D48);
 

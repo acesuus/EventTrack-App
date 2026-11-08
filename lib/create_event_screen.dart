@@ -22,7 +22,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Theme Colors
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -411,7 +411,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
             onChanged: onChanged,
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+              hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 14),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
@@ -438,7 +438,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           keyboardType: TextInputType.number,
           decoration: InputDecoration(
             hintText: 'e.g., 10',
-            hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+            hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 14),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),

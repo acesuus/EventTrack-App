@@ -14,7 +14,7 @@ class StudentHomeScreen extends StatefulWidget {
 
 class _StudentHomeScreenState extends State<StudentHomeScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   
   StreamSubscription<Position>? _positionStream;
   String _statusMessage = "Scanning for nearby events...";
@@ -213,7 +213,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   const SizedBox(height: 10),
                   const Text(
                     "Keep this app open while entering the venue.",
-                    style: TextStyle(color: Colors.grey),
+                    style: TextStyle(color: Color(0xFF616161)),
                   )
                 ],
               ),

@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 
 import 'admin_auth_screen.dart';
 import 'firebase_options.dart';
+import 'widgets/student_ui.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   
-  runApp(const MaterialApp(
+  runApp(MaterialApp(
     title: 'EventTrack Admin',
-    home: AdminAuthGate(),
+    theme: StudentUi.theme,
+    home: const AdminAuthGate(),
     debugShowCheckedModeBanner: false,
   ));
 }

@@ -28,7 +28,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
   bool _obscurePassword = true;
 
   // Theme Colors from your mockup
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -127,10 +127,15 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         }
       }
     } catch (e) {
+      debugPrint('Login failed: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Couldn't log in. Check your internet connection and try again.",
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -241,7 +246,9 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                     const SizedBox(height: 24),
 
                     // Email Field
-                    Text(
+                    // Visual label; the field below carries the same label for screen readers.
+                    ExcludeSemantics(
+                      child: Text(
                       'Student Email or ID',
                       style: TextStyle(
                         fontSize: 12,
@@ -249,19 +256,22 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                         color: _darkText,
                       ),
                     ),
+                    ),
                     const SizedBox(height: 8),
-                    TextField(
+                    Semantics(
+                      label: 'Student Email or ID',
+                      child: TextField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
                         hintText: 'student@psu.palawan.edu.ph',
                         hintStyle: TextStyle(
-                          color: Colors.grey.shade400,
+                          color: Colors.grey.shade600,
                           fontSize: 14,
                         ),
                         prefixIcon: Icon(
                           Icons.mail_outline,
-                          color: Colors.grey.shade400,
+                          color: Colors.grey.shade600,
                         ),
                         contentPadding: const EdgeInsets.symmetric(
                           vertical: 16,
@@ -279,10 +289,13 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                         ),
                       ),
                     ),
+                    ),
                     const SizedBox(height: 20),
 
                     // Password Field
-                    Text(
+                    // Visual label; the field below carries the same label for screen readers.
+                    ExcludeSemantics(
+                      child: Text(
                       'Password',
                       style: TextStyle(
                         fontSize: 12,
@@ -290,26 +303,32 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                         color: _darkText,
                       ),
                     ),
+                    ),
                     const SizedBox(height: 8),
-                    TextField(
+                    Semantics(
+                      label: 'Password',
+                      child: TextField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         hintText: 'Enter your password',
                         hintStyle: TextStyle(
-                          color: Colors.grey.shade400,
+                          color: Colors.grey.shade600,
                           fontSize: 14,
                         ),
                         prefixIcon: Icon(
                           Icons.lock_outline,
-                          color: Colors.grey.shade400,
+                          color: Colors.grey.shade600,
                         ),
                         suffixIcon: IconButton(
+                          tooltip: _obscurePassword
+                              ? 'Show password'
+                              : 'Hide password',
                           icon: Icon(
                             _obscurePassword
                                 ? Icons.visibility_off
                                 : Icons.visibility,
-                            color: Colors.grey.shade400,
+                            color: Colors.grey.shade600,
                           ),
                           onPressed: () => setState(
                             () => _obscurePassword = !_obscurePassword,
@@ -330,6 +349,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                           ),
                         ),
                       ),
+                    ),
                     ),
                     const SizedBox(height: 24),
 
@@ -368,22 +388,6 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Forgot Password
-                    Center(
-                      child: TextButton(
-                        onPressed:
-                            () {}, // Add password reset logic later if needed
-                        child: Text(
-                          'Forgot Password?',
-                          style: TextStyle(
-                            color: _primaryGreen,
-                            fontWeight: FontWeight.w600,
-                          ),
                         ),
                       ),
                     ),

@@ -20,7 +20,7 @@ class AdminSettingsScreen extends StatefulWidget {
 
 class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   // Theme Colors
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -238,6 +238,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       backgroundColor: _primaryGreen,
       elevation: 0,
       leading: IconButton(
+        tooltip: 'Back',
         icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 18),
         onPressed: () => Navigator.pop(context),
       ),
@@ -254,7 +255,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           ),
           Text(
             'Admin preferences',
-            style: TextStyle(color: Colors.white70, fontSize: 12),
+            style: TextStyle(color: Colors.white, fontSize: 12),
           ),
         ],
       ),
@@ -405,7 +406,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               ),
               Text(
                 subtitle,
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF616161)),
               ),
             ],
           ),
@@ -846,11 +847,11 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       type: BottomNavigationBarType.fixed,
       currentIndex: 3, // Focus on 'Settings' tab
       selectedItemColor: _primaryGreen,
-      unselectedItemColor: Colors.grey,
+      unselectedItemColor: Color(0xFF616161),
       onTap: (index) {
         if (index == 3) return; // Already on this tab
         if (index == 0) {
-          Navigator.pop(context); // Go back to Dashboard
+          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
         } else if (index == 1) {
           Navigator.pushReplacement(
             context,

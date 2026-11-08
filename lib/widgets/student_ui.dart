@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 
 abstract final class StudentUi {
-  static const green = Color(0xFF28A776);
+  static const green = Color(0xFF1E7F5A);
   static const ink = Color(0xFF0C2D48);
   static const muted = Color(0xFF63716B);
   static const background = Color(0xFFF5F7F6);
   static const line = Color(0xFFE0E6E2);
+
+  /// Shared app theme so default widgets (spinners, dialogs, text buttons) use the brand green.
+  static final theme = ThemeData(
+    colorScheme: ColorScheme.fromSeed(seedColor: green, primary: green),
+  );
 }
 
 class StudentSurface extends StatelessWidget {

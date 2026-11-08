@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'student_consent_screen.dart';
 import 'student_dashboard.dart';
 import 'student_login_screen.dart';
+import 'widgets/student_ui.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,7 @@ void main() async {
   runApp(
     MaterialApp(
       title: 'EventTrack Student',
+      theme: StudentUi.theme,
       home: isLoggedIn
           ? (hasConsented
                 ? StudentDashboardScreen(

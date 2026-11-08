@@ -18,7 +18,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Theme Colors matching your UI
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -39,6 +39,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
         // REAL FIREBASE CONNECTION
         stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -132,7 +133,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                         const Center(
                           child: Padding(
                             padding: EdgeInsets.all(20.0),
-                            child: Text("No events on this date.", style: TextStyle(color: Colors.grey)),
+                            child: Text("No events on this date.", style: TextStyle(color: Color(0xFF616161))),
                           ),
                         )
                       else
@@ -164,6 +165,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       backgroundColor: _primaryGreen,
       elevation: 0,
       leading: IconButton(
+        tooltip: 'Back',
         icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 18),
         onPressed: () => Navigator.pop(context),
       ),
@@ -175,7 +177,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Manage Events', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              Text('$count total events', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              Text('$count total events', style: const TextStyle(color: Colors.white, fontSize: 12)),
             ],
           );
         }
@@ -183,19 +185,16 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 16.0, top: 8, bottom: 8),
-          child: InkWell(
-            onTap: () {
+          child: IconButton(
+            tooltip: 'Create event',
+            onPressed: () {
               Navigator.push(context, MaterialPageRoute(builder: (context) => CreateEventScreen(preSelectedDate: _selectedDay)));
             },
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.add, color: _primaryGreen, size: 24),
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
+            icon: Icon(Icons.add, color: _primaryGreen, size: 24),
           ),
         ),
       ],
@@ -295,7 +294,12 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const AttendanceMonitoringScreen()),
+                      MaterialPageRoute(
+                        builder: (context) => AttendanceMonitoringScreen(
+                          initialEventId: eventId,
+                          initialEventData: data,
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -344,11 +348,11 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       type: BottomNavigationBarType.fixed,
       currentIndex: 1, // Focus on 'Events' tab
       selectedItemColor: _primaryGreen,
-      unselectedItemColor: Colors.grey,
+      unselectedItemColor: Color(0xFF616161),
       onTap: (index) {
         if (index == 1) return; // Already on this tab
         if (index == 0) {
-          Navigator.pop(context); // Go back to Dashboard
+          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
         } else if (index == 2) {
           Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const AttendanceMonitoringScreen(), transitionDuration: Duration.zero));
         } else if (index == 3) {

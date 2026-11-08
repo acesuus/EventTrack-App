@@ -21,7 +21,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final int _selectedIndex = 0;
 
   // Theme Colors based on your UI
-  final Color _primaryGreen = const Color(0xFF28A776);
+  final Color _primaryGreen = const Color(0xFF1E7F5A);
   final Color _lightGreenBg = const Color(0xFFEAF9F1);
   final Color _darkText = const Color(0xFF0C2D48);
 
@@ -149,7 +149,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
         selectedItemColor: _primaryGreen,
-        unselectedItemColor: Colors.grey,
+        unselectedItemColor: Color(0xFF616161),
         onTap: (index) {
           if (index == 0) return;
           if (index == 1) {
@@ -231,7 +231,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     Text(
                       'Welcome, Admin',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                      style: TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ],
                 ),
@@ -293,7 +293,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(color: Colors.white70, fontSize: 11),
+              style: const TextStyle(color: Colors.white, fontSize: 11),
             ),
           ],
         ),
@@ -458,6 +458,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .orderBy('startTime')
                   .snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Padding(
                     padding: EdgeInsets.all(20.0),
@@ -472,7 +473,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     child: Center(
                       child: Text(
                         "No active events currently.",
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: Color(0xFF616161)),
                       ),
                     ),
                   );
@@ -492,7 +493,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     child: Center(
                       child: Text(
                         "No active events currently.",
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: Color(0xFF616161)),
                       ),
                     ),
                   );

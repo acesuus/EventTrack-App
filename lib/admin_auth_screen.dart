@@ -71,7 +71,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _form = GlobalKey<FormState>();
-  static const _primaryGreen = Color(0xFF28A776);
+  static const _primaryGreen = Color(0xFF1E7F5A);
   static const _lightGreenBg = Color(0xFFEAF9F1);
   static const _darkText = Color(0xFF0C2D48);
   static const _demoEmail = String.fromEnvironment('ADMIN_DEMO_EMAIL');
@@ -148,8 +148,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-      prefixIcon: Icon(icon, color: Colors.grey.shade400),
+      hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+      prefixIcon: Icon(icon, color: Colors.grey.shade600),
       suffixIcon: suffix,
       contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -314,7 +314,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                     _obscurePassword
                                         ? Icons.visibility_off
                                         : Icons.visibility,
-                                    color: Colors.grey.shade400,
+                                    color: Colors.grey.shade600,
                                   ),
                                   onPressed: _busy
                                       ? null
