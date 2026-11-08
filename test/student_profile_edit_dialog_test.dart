@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget host(
-  Future<void> Function(String, String) save, {
+  Future<void> Function(String) save, {
   ValueChanged<bool?>? result,
 }) => MaterialApp(
   home: Scaffold(
@@ -41,20 +41,35 @@ Future<void> open(WidgetTester tester, Widget app) async {
 }
 
 void main() {
-  testWidgets('invalid name and email show field errors without saving', (
+  testWidgets('school email shows the login email and is read-only', (
     tester,
   ) async {
-    var calls = 0;
-    await open(tester, host((name, email) async => calls++));
-    await tester.enterText(find.byKey(const Key('profile-name')), '  ');
-    await tester.enterText(
-      find.byKey(const Key('profile-email')),
-      'invalid-email',
+    await open(tester, host((name) async {}));
+    final field = find.byKey(const Key('profile-email'));
+    expect(
+      find.descendant(
+        of: field,
+        matching: find.text('kert@psu.palawan.edu.ph'),
+      ),
+      findsOneWidget,
     );
+    expect(
+      tester
+          .widget<TextField>(
+            find.descendant(of: field, matching: find.byType(TextField)),
+          )
+          .readOnly,
+      isTrue,
+    );
+  });
+
+  testWidgets('empty name shows a field error without saving', (tester) async {
+    var calls = 0;
+    await open(tester, host((name) async => calls++));
+    await tester.enterText(find.byKey(const Key('profile-name')), '  ');
     await tester.tap(find.text('Save changes'));
     await tester.pumpAndSettle();
     expect(find.text('Enter your full name.'), findsOneWidget);
-    expect(find.text('Enter a valid email address.'), findsOneWidget);
     expect(calls, 0);
     expect(tester.takeException(), isNull);
   });
@@ -65,24 +80,18 @@ void main() {
       final pending = Completer<void>();
       var calls = 0;
       String? savedName;
-      String? savedEmail;
       bool? result;
       await open(
         tester,
-        host((name, email) async {
+        host((name) async {
           calls++;
           savedName = name;
-          savedEmail = email;
           await pending.future;
         }, result: (value) => result = value),
       );
       await tester.enterText(
         find.byKey(const Key('profile-name')),
         '  Kert Dela Cruz  ',
-      );
-      await tester.enterText(
-        find.byKey(const Key('profile-email')),
-        '  kert.updated@psu.palawan.edu.ph  ',
       );
       await tester.tap(find.text('Save changes'));
       await tester.pump();
@@ -102,7 +111,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(result, isTrue);
       expect(savedName, 'Kert Dela Cruz');
-      expect(savedEmail, 'kert.updated@psu.palawan.edu.ph');
       expect(calls, 1);
       expect(find.byType(StudentProfileEditDialog), findsNothing);
     },
@@ -112,7 +120,7 @@ void main() {
     var calls = 0;
     await open(
       tester,
-      host((name, email) async {
+      host((name) async {
         calls++;
         if (calls == 1) throw StateError('offline');
       }),

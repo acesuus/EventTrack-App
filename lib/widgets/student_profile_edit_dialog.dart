@@ -14,7 +14,7 @@ class StudentProfileEditDialog extends StatefulWidget {
   final String name;
   final String email;
   final String studentId;
-  final Future<void> Function(String name, String email) onSave;
+  final Future<void> Function(String name) onSave;
 
   @override
   State<StudentProfileEditDialog> createState() =>
@@ -24,14 +24,12 @@ class StudentProfileEditDialog extends StatefulWidget {
 class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
   final _form = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.name);
-  late final _email = TextEditingController(text: widget.email);
   bool _saving = false;
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
-    _email.dispose();
     super.dispose();
   }
 
@@ -43,7 +41,7 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
       _error = null;
     });
     try {
-      await widget.onSave(_name.text.trim(), _email.text.trim());
+      await widget.onSave(_name.text.trim());
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (_) {
@@ -195,26 +193,18 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
                       _label('School email'),
                       TextFormField(
                         key: const Key('profile-email'),
-                        controller: _email,
-                        enabled: !_saving,
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: TextInputAction.done,
-                        autofillHints: const [AutofillHints.email],
-                        autocorrect: false,
-                        decoration: _decoration(
-                          'student-id@psu.palawan.edu.ph',
-                          Icons.mail_outline,
-                        ),
-                        validator: (value) {
-                          final email = value?.trim() ?? '';
-                          return email.isEmpty ||
-                                  RegExp(
-                                    r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-                                  ).hasMatch(email)
-                              ? null
-                              : 'Enter a valid email address.';
-                        },
-                        onFieldSubmitted: (_) => _save(),
+                        // The school email is the login email, so it can't be edited here.
+                        initialValue: widget.email,
+                        readOnly: true,
+                        enableInteractiveSelection: true,
+                        decoration:
+                            _decoration(
+                              'student-id@psu.palawan.edu.ph',
+                              Icons.mail_outline,
+                            ).copyWith(
+                              helperText:
+                                  'Your login email. It can\'t be changed.',
+                            ),
                       ),
                       if (_error != null)
                         Padding(

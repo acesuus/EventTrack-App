@@ -903,11 +903,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         name: currentName,
         email: currentEmail == 'No email saved' ? '' : currentEmail,
         studentId: widget.studentId,
-        onSave: (name, email) async {
+        onSave: (name) async {
           // Update the personal profile; the official roster remains admin-managed.
           await _firestore.collection('users').doc(widget.studentId).update({
             'name': name,
-            'email': email,
+            'email': currentEmail,
           });
           await _applyProfileName(name);
         },
@@ -995,7 +995,11 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
               final deviceId =
                   userData['registeredDeviceId']?.toString() ??
                   'Not registered';
-              final rawEmail = userData['email']?.toString().trim() ?? '';
+              // The school email is the one they log in with.
+              final rawEmail =
+                  FirebaseAuth.instance.currentUser?.email ??
+                  userData['email']?.toString().trim() ??
+                  '';
               final email = rawEmail.contains('@')
                   ? rawEmail
                   : 'No email saved';
