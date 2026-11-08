@@ -662,7 +662,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                             child: const Text(
                               'Event',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 12,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -708,7 +708,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                               child: const Text(
                                 'You',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -788,7 +788,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
               : 'CONTINUOUS ATTENDANCE',
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
             letterSpacing: 1,
           ),

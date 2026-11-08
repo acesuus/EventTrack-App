@@ -222,7 +222,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'EventTrack Admin - Active',
+                      'EventTrack Admin',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -258,7 +258,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   _buildStatCard(
                     Icons.calendar_today,
                     activeCount.toString(),
-                    'Active Events',
+                    'Upcoming & live events',
                   ),
                 ],
               );
@@ -293,7 +293,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
             ),
           ],
         ),
@@ -324,10 +324,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
+            padding: EdgeInsets.zero,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: 1.5,
+            // Grows with the user's text size so labels never clip.
+            childAspectRatio:
+                1.5 / MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6),
             children: [
               _buildActionItem(
                 title: 'Create Event',
@@ -341,7 +344,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               _buildActionItem(
-                title: 'Monitor\nAttendance',
+                title: 'Monitor Attendance',
                 icon: Icons.people_outline,
                 isPrimary: false,
                 onTap: () {
@@ -387,37 +390,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     required bool isPrimary,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isPrimary ? _primaryGreen : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: isPrimary
-              ? null
-              : Border.all(color: _primaryGreen.withValues(alpha: 0.3)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: isPrimary ? Colors.white : _primaryGreen,
-              size: 28,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isPrimary ? _primaryGreen : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: isPrimary
+                ? null
+                : Border.all(color: _primaryGreen.withValues(alpha: 0.3)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
                 color: isPrimary ? Colors.white : _primaryGreen,
-                fontWeight: isPrimary ? FontWeight.bold : FontWeight.w500,
-                fontSize: 13,
+                size: 28,
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: isPrimary ? Colors.white : _primaryGreen,
+                  fontWeight: isPrimary ? FontWeight.bold : FontWeight.w500,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -434,7 +440,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Active Events',
+                  'Upcoming & Live Events',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -442,7 +448,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ManageEventsScreen(),
+                    ),
+                  ),
                   child: Text(
                     'View All',
                     style: TextStyle(color: _primaryGreen),
@@ -458,7 +469,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .orderBy('startTime')
                   .snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
+                if (snapshot.hasError)
+                  return const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(
+                      child: Text(
+                        "Couldn't load data. Check your internet connection.",
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Padding(
                     padding: EdgeInsets.all(20.0),
@@ -472,7 +492,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     padding: EdgeInsets.all(20.0),
                     child: Center(
                       child: Text(
-                        "No active events currently.",
+                        "No upcoming or live events.",
                         style: TextStyle(color: Color(0xFF616161)),
                       ),
                     ),
@@ -492,7 +512,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     padding: EdgeInsets.all(20.0),
                     child: Center(
                       child: Text(
-                        "No active events currently.",
+                        "No upcoming or live events.",
                         style: TextStyle(color: Color(0xFF616161)),
                       ),
                     ),
@@ -510,159 +530,164 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => CreateEventScreen(
-                                eventId: docId,
-                                existingData: data,
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => CreateEventScreen(
+                                  eventId: docId,
+                                  existingData: data,
+                                ),
                               ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Ink(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.green.shade100),
                             ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.green.shade100),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: _primaryGreen,
-                                  borderRadius: BorderRadius.circular(12),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: _primaryGreen,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.calendar_today,
+                                    color: Colors.white,
+                                  ),
                                 ),
-                                child: const Icon(
-                                  Icons.calendar_today,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            data['title'] ?? 'Untitled Event',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                              color: _darkText,
-                                            ),
-                                          ),
-                                        ),
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            GestureDetector(
-                                              onTap: () =>
-                                                  _completeEvent(docId),
-                                              child: Icon(
-                                                Icons.check_circle_outline,
-                                                size: 20,
-                                                color: Colors.green.shade400,
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              data['title'] ?? 'Untitled Event',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: _darkText,
                                               ),
                                             ),
-                                            const SizedBox(width: 12),
-                                            GestureDetector(
-                                              onTap: () => _deleteEvent(docId),
-                                              child: Icon(
-                                                Icons.close,
-                                                size: 18,
-                                                color: Colors.grey.shade400,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    StreamBuilder<QuerySnapshot>(
-                                      stream: FirebaseFirestore.instance
-                                          .collection('attendance')
-                                          .where('eventId', isEqualTo: docId)
-                                          .snapshots(),
-                                      builder: (context, attSnapshot) {
-                                        int count = 0;
-                                        if (attSnapshot.hasData) {
-                                          count = attSnapshot.data!.docs.length;
-                                        }
-                                        return Text(
-                                          "${data['venueName'] ?? 'Unknown Venue'} • $count attendees",
-                                          style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 13,
                                           ),
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.access_time,
-                                          size: 14,
-                                          color: Colors.grey.shade500,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          _formatTime(data['startTime']),
-                                          style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.green.shade50,
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                          ),
-                                          child: Row(
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(
-                                                Icons.check_circle,
-                                                size: 12,
-                                                color: _primaryGreen,
+                                              GestureDetector(
+                                                onTap: () =>
+                                                    _completeEvent(docId),
+                                                child: Icon(
+                                                  Icons.check_circle_outline,
+                                                  size: 20,
+                                                  color: Colors.green.shade400,
+                                                ),
                                               ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'Active',
-                                                style: TextStyle(
-                                                  color: _primaryGreen,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.bold,
+                                              const SizedBox(width: 12),
+                                              GestureDetector(
+                                                onTap: () =>
+                                                    _deleteEvent(docId),
+                                                child: Icon(
+                                                  Icons.close,
+                                                  size: 18,
+                                                  color: Colors.grey.shade400,
                                                 ),
                                               ),
                                             ],
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ], // Column children
-                                ), // Column
-                              ), // Expanded
-                            ], // Row children
-                          ), // Row
-                        ), // Container
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      StreamBuilder<QuerySnapshot>(
+                                        stream: FirebaseFirestore.instance
+                                            .collection('attendance')
+                                            .where('eventId', isEqualTo: docId)
+                                            .snapshots(),
+                                        builder: (context, attSnapshot) {
+                                          int count = 0;
+                                          if (attSnapshot.hasData) {
+                                            count =
+                                                attSnapshot.data!.docs.length;
+                                          }
+                                          return Text(
+                                            "${data['venueName'] ?? 'Unknown Venue'} • $count attendees",
+                                            style: TextStyle(
+                                              color: Colors.grey.shade600,
+                                              fontSize: 13,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.access_time,
+                                            size: 14,
+                                            color: Colors.grey.shade500,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            _formatTime(data['startTime']),
+                                            style: TextStyle(
+                                              color: Colors.grey.shade600,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.check_circle,
+                                                  size: 12,
+                                                  color: _primaryGreen,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  'Active',
+                                                  style: TextStyle(
+                                                    color: _primaryGreen,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ], // Column children
+                                  ), // Column
+                                ), // Expanded
+                              ], // Row children
+                            ), // Row
+                          ), // Container
+                        ),
                       ), // InkWell
                     ); // Padding
                   },

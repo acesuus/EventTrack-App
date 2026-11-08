@@ -25,8 +25,6 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   final Color _darkText = const Color(0xFF0C2D48);
 
   // Toggle States
-  bool _notificationsEnabled = true;
-  bool _autoBackupEnabled = true;
 
   /// Shows the required CSV column format before letting the admin pick a file.
   Future<void> _showImportInstructions() async {
@@ -56,11 +54,14 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 },
                 children: [
                   _instructionRow('Col', 'Field (Example)', isHeader: true),
-                  _instructionRow('A', 'Student ID (2021-1-00123)'),
+                  _instructionRow('A', 'Student ID (0000-0-0000)'),
                   _instructionRow('B', 'Full Name (Juan D. Cruz)'),
                   _instructionRow('C', 'Program (BSCS, BSIT, BSIS)'),
                   _instructionRow('D', 'Year & Block (1-A)'),
-                  _instructionRow('E', 'PSU Email (juan.cruz@psu.palawan.edu.ph)'),
+                  _instructionRow(
+                    'E',
+                    'PSU Email (student-id@psu.palawan.edu.ph)',
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -228,8 +229,6 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           children: [
             _buildProfileCard(),
             const SizedBox(height: 20),
-            _buildPreferencesCard(),
-            const SizedBox(height: 20),
             _buildDataManagementCard(),
             const SizedBox(height: 24),
             _buildLogoutButton(),
@@ -336,100 +335,6 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
-  Widget _buildPreferencesCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.settings_outlined, color: _primaryGreen, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Preferences',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: _darkText,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _buildToggleRow(
-            icon: Icons.notifications_none,
-            title: 'Notifications',
-            subtitle: 'Receive alerts for new attendance',
-            value: _notificationsEnabled,
-            onChanged: (val) => setState(() => _notificationsEnabled = val),
-          ),
-          const Divider(height: 24),
-          _buildToggleRow(
-            icon: Icons.storage_outlined,
-            title: 'Auto-backup Reports',
-            subtitle: 'Daily backup of attendance data',
-            value: _autoBackupEnabled,
-            onChanged: (val) => setState(() => _autoBackupEnabled = val),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToggleRow({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required Function(bool) onChanged,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, color: _darkText.withValues(alpha: 0.6), size: 24),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: _darkText,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF616161)),
-              ),
-            ],
-          ),
-        ),
-        Switch(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: Colors.white,
-          activeTrackColor: _primaryGreen,
-          inactiveThumbColor: Colors.white,
-          inactiveTrackColor: Colors.grey.shade300,
-        ),
-      ],
-    );
-  }
-
   Future<void> _showAddStudentDialog() async {
     final TextEditingController firstNameCtrl = TextEditingController();
     final TextEditingController miCtrl = TextEditingController();
@@ -519,7 +424,9 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                         !email.contains('@')) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Fill in name, Student ID and a valid email.'),
+                          content: Text(
+                            'Fill in name, Student ID and a valid email.',
+                          ),
                         ),
                       );
                       return;
@@ -673,12 +580,16 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       await batch.commit();
       if (!dialogContext.mounted) return;
       ScaffoldMessenger.of(dialogContext).showSnackBar(
-        const SnackBar(content: Text('Device reset. The student can log in on a new phone.')),
+        const SnackBar(
+          content: Text('Device reset. The student can log in on a new phone.'),
+        ),
       );
     } catch (e) {
       if (!dialogContext.mounted) return;
       ScaffoldMessenger.of(dialogContext).showSnackBar(
-        const SnackBar(content: Text("Couldn't reset the device. Check your connection.")),
+        const SnackBar(
+          content: Text("Couldn't reset the device. Check your connection."),
+        ),
       );
     }
   }
@@ -868,24 +779,27 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     required Color borderColor,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: borderColor),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: textColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: textColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
           ),
         ),
@@ -932,7 +846,10 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
       onTap: (index) {
         if (index == 3) return; // Already on this tab
         if (index == 0) {
-          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
+          Navigator.popUntil(
+            context,
+            (route) => route.isFirst,
+          ); // Dashboard is the root route
         } else if (index == 1) {
           Navigator.pushReplacement(
             context,

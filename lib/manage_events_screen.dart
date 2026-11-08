@@ -37,9 +37,21 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       appBar: _buildAppBar(),
       body: StreamBuilder<QuerySnapshot>(
         // REAL FIREBASE CONNECTION
-        stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
+        stream: _firestore
+            .collection('events')
+            .orderBy('startTime', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
+          if (snapshot.hasError)
+            return const Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: Text(
+                  "Couldn't load data. Check your internet connection.",
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -98,7 +110,8 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                       return allEvents.where((doc) {
                         var data = doc.data() as Map<String, dynamic>;
                         if (data['startTime'] == null) return false;
-                        DateTime eventDate = (data['startTime'] as Timestamp).toDate();
+                        DateTime eventDate = (data['startTime'] as Timestamp)
+                            .toDate();
                         return isSameDay(eventDate, day);
                       }).toList();
                     },
@@ -119,21 +132,32 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.check_circle_outline, color: _primaryGreen, size: 20),
+                          Icon(
+                            Icons.check_circle_outline,
+                            color: _primaryGreen,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           Text(
-                            'Events on ${DateFormat('MMM dd').format(_selectedDay)} (${filteredEvents.length})', 
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)
+                            'Events on ${DateFormat('MMM dd').format(_selectedDay)} (${filteredEvents.length})',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: _darkText,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      
+
                       if (filteredEvents.isEmpty)
                         const Center(
                           child: Padding(
                             padding: EdgeInsets.all(20.0),
-                            child: Text("No events on this date.", style: TextStyle(color: Color(0xFF616161))),
+                            child: Text(
+                              "No events on this date.",
+                              style: TextStyle(color: Color(0xFF616161)),
+                            ),
                           ),
                         )
                       else
@@ -176,11 +200,21 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Manage Events', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              Text('$count total events', style: const TextStyle(color: Colors.white, fontSize: 12)),
+              const Text(
+                'Manage Events',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '$count total events',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
             ],
           );
-        }
+        },
       ),
       actions: [
         Padding(
@@ -188,11 +222,19 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
           child: IconButton(
             tooltip: 'Create event',
             onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => CreateEventScreen(preSelectedDate: _selectedDay)));
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      CreateEventScreen(preSelectedDate: _selectedDay),
+                ),
+              );
             },
             style: IconButton.styleFrom(
               backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             icon: Icon(Icons.add, color: _primaryGreen, size: 24),
           ),
@@ -222,10 +264,14 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                   color: _primaryGreen,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.calendar_today, color: Colors.white, size: 24),
+                child: const Icon(
+                  Icons.calendar_today,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 16),
-              
+
               // Event Details
               Expanded(
                 child: Column(
@@ -233,32 +279,51 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                   children: [
                     Text(
                       data['title'] ?? 'Untitled Event',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(color: Colors.blue.shade200),
                       ),
                       child: Text(
-                        data['eventType'] == 'type1_in_out' ? 'Type 1 (In/Out)' : 'Type 2 (Continuous)',
-                        style: TextStyle(fontSize: 10, color: Colors.blue.shade700, fontWeight: FontWeight.bold),
+                        data['eventType'] == 'type1_in_out'
+                            ? 'Time In / Out'
+                            : 'Continuous stay',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue.shade800,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _buildIconText(Icons.location_on_outlined, data['venueName'] ?? 'Unknown Venue'),
+                    _buildIconText(
+                      Icons.location_on_outlined,
+                      data['venueName'] ?? 'Unknown Venue',
+                    ),
                     const SizedBox(height: 4),
-                    _buildIconText(Icons.access_time, _formatDate(data['startTime'])),
+                    _buildIconText(
+                      Icons.access_time,
+                      _formatDate(data['startTime']),
+                    ),
                   ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          
+
           // Action Buttons
           Row(
             children: [
@@ -316,28 +381,49 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       children: [
         Icon(icon, size: 14, color: Colors.grey.shade600),
         const SizedBox(width: 6),
-        Expanded(child: Text(text, style: TextStyle(color: Colors.grey.shade700, fontSize: 13))),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildActionButton({required IconData icon, required String label, required Color bgColor, required Color textColor, required VoidCallback onTap}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 16, color: textColor),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13)),
-          ],
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color bgColor,
+    required Color textColor,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: textColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -352,18 +438,45 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
       onTap: (index) {
         if (index == 1) return; // Already on this tab
         if (index == 0) {
-          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
+          Navigator.popUntil(
+            context,
+            (route) => route.isFirst,
+          ); // Dashboard is the root route
         } else if (index == 2) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const AttendanceMonitoringScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const AttendanceMonitoringScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         } else if (index == 3) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const AdminSettingsScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const AdminSettingsScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         }
       },
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-        BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Events'),
-        BottomNavigationBarItem(icon: Icon(Icons.insert_chart_outlined), label: 'Reports'),
-        BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.dashboard_outlined),
+          label: 'Dashboard',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_today),
+          label: 'Events',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.insert_chart_outlined),
+          label: 'Reports',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.settings_outlined),
+          label: 'Settings',
+        ),
       ],
     );
   }

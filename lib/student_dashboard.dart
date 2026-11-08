@@ -677,68 +677,89 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           }
         }
 
-        return InkWell(
-          onTap: () => setState(() {
-            _selectedIndex = 2;
-          }),
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 20),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_primaryGreen, Colors.green.shade700],
-              ),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: () => setState(() {
+                _selectedIndex = 2;
+              }),
               borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: _primaryGreen.withValues(alpha: 0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: const BoxDecoration(
-                    color: Colors.white24,
-                    shape: BoxShape.circle,
+              child: Ink(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [_primaryGreen, Colors.green.shade700],
                   ),
-                  child: const Icon(Icons.stars, color: Colors.white, size: 30),
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _primaryGreen.withValues(alpha: 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'CS Association Points',
-                        style: TextStyle(color: Colors.white, fontSize: 14),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: const BoxDecoration(
+                        color: Colors.white24,
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$totalPoints pts',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: const Icon(
+                        Icons.stars,
+                        color: Colors.white,
+                        size: 30,
                       ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Tap to view breakdown ->',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                        ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'CS Association Points',
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            snapshot.hasData ? '$totalPoints pts' : '— pts',
+                            semanticsLabel: snapshot.hasData
+                                ? '$totalPoints points'
+                                : 'Loading points',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Row(
+                            children: [
+                              Text(
+                                'View breakdown',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         );
@@ -837,56 +858,12 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     ),
                   ),
                   Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: MediaQuery.of(context).size.width > 600
-                            ? MediaQuery.of(context).size.width
-                            : 600,
-                        child: PaginatedDataTable(
-                          headingRowColor: WidgetStateProperty.all(
-                            Colors.grey.shade100,
-                          ),
-                          dataRowMaxHeight: 60,
-                          columns: const [
-                            DataColumn(
-                              label: Text(
-                                'Event Name',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            DataColumn(
-                              label: Text(
-                                'Event Type',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            DataColumn(
-                              label: Text(
-                                'Date & Time',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            DataColumn(
-                              label: Text(
-                                'Remarks',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            DataColumn(
-                              label: Text(
-                                'Points',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              numeric: true,
-                            ),
-                          ],
-                          source: _AttendanceDataSource(records),
-                          rowsPerPage: 5,
-                          availableRowsPerPage: const [5],
-                          showFirstLastButtons: true,
-                          columnSpacing: 20.0,
-                        ),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      itemCount: records.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) => _AttendanceRecordTile(
+                        data: records[index].data() as Map<String, dynamic>,
                       ),
                     ),
                   ),
@@ -1623,7 +1600,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                               windowInfo['bannerSubtext'] as String,
                               style: const TextStyle(
                                 color: Color(0xFF616161),
-                                fontSize: 11,
+                                fontSize: 12,
                               ),
                             ),
                           ],
@@ -1830,7 +1807,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   Widget _buildLoadErrorState() => _buildEmptyState(
     icon: Icons.cloud_off,
     title: "Couldn't load data",
-    subtitle: 'Check your internet connection. This will update automatically when you are back online.',
+    subtitle:
+        'Check your internet connection. This will update automatically when you are back online.',
   );
 
   Widget _buildEmptyState({
@@ -1895,70 +1873,79 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   }
 }
 
-class _AttendanceDataSource extends DataTableSource {
-  final List<QueryDocumentSnapshot> docs;
+class _AttendanceRecordTile extends StatelessWidget {
+  const _AttendanceRecordTile({required this.data});
 
-  _AttendanceDataSource(this.docs);
+  final Map<String, dynamic> data;
 
   @override
-  DataRow? getRow(int index) {
-    if (index >= docs.length) return null;
-
-    final doc = docs[index];
-    final data = doc.data() as Map<String, dynamic>;
-    final eventName = data['eventName'] ?? data['eventTitle'] ?? 'Legacy Event';
-
-    String eventTypeStr = 'Standard';
+  Widget build(BuildContext context) {
+    final eventName =
+        (data['eventName'] ?? data['eventTitle'] ?? 'Legacy Event').toString();
     final type = data['eventType'];
-    if (type == 'type1_in_out') {
-      eventTypeStr = 'Time In/Out';
-    } else if (type == 'type2_continuous') {
-      eventTypeStr = 'Continuous';
-    }
-
+    final eventType = type == 'type1_in_out'
+        ? 'Time In/Out'
+        : (type == 'type2_continuous' ? 'Continuous' : 'Standard');
     final timeIn = data['timeIn'] as Timestamp?;
-    final dateStr = timeIn != null
-        ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate())
-        : 'Unknown';
-
+    final date = timeIn != null
+        ? DateFormat('MMM d, yyyy · hh:mm a').format(timeIn.toDate())
+        : 'Unknown date';
     final status = data['status']?.toString() ?? 'Absent';
-    Color statusColor = Colors.red.shade700;
-    if (status == 'Present') {
-      statusColor = Colors.green.shade800;
-    } else if (status == 'Late' || status == 'Partial') {
-      statusColor = Colors.orange.shade900;
-    }
-
+    final statusColor = status == 'Present'
+        ? Colors.green.shade800
+        : (status == 'Late' || status == 'Partial')
+        ? Colors.orange.shade900
+        : Colors.red.shade700;
     final pts =
         data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
 
-    return DataRow(
-      cells: [
-        DataCell(Text(eventName)),
-        DataCell(Text(eventTypeStr)),
-        DataCell(Text(dateStr)),
-        DataCell(
-          Text(
-            status,
-            style: TextStyle(color: statusColor, fontWeight: FontWeight.bold),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  eventName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF0C2D48),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$eventType · $date',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF616161),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  status,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        DataCell(
+          const SizedBox(width: 12),
           Text(
             '+$pts pts',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
-
-  @override
-  bool get isRowCountApproximate => false;
-
-  @override
-  int get rowCount => docs.length;
-
-  @override
-  int get selectedRowCount => 0;
 }

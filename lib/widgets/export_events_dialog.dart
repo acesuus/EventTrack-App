@@ -302,7 +302,7 @@ class _ExportEventsDialogState extends State<ExportEventsDialog> {
         number,
         style: const TextStyle(
           color: _muted,
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -376,7 +376,7 @@ class _ExportEventsDialogState extends State<ExportEventsDialog> {
                   subtitle,
                   style: const TextStyle(
                     color: _muted,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.4,
                   ),
                 ),

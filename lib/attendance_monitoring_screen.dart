@@ -3,18 +3,25 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'manage_events_screen.dart';
 import 'admin_settings_screen.dart';
+
 class AttendanceMonitoringScreen extends StatefulWidget {
-  const AttendanceMonitoringScreen({super.key, this.initialEventId, this.initialEventData});
+  const AttendanceMonitoringScreen({
+    super.key,
+    this.initialEventId,
+    this.initialEventData,
+  });
 
   /// Event to show first, e.g. when opened from an event card.
   final String? initialEventId;
   final Map<String, dynamic>? initialEventData;
 
   @override
-  State<AttendanceMonitoringScreen> createState() => _AttendanceMonitoringScreenState();
+  State<AttendanceMonitoringScreen> createState() =>
+      _AttendanceMonitoringScreenState();
 }
 
-class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen> {
+class _AttendanceMonitoringScreenState
+    extends State<AttendanceMonitoringScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Theme Colors
@@ -91,15 +98,35 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
   Map<String, dynamic> _getStatusStyle(String status) {
     switch (status.toLowerCase()) {
       case 'present':
-        return {'color': _primaryGreen, 'icon': Icons.check_circle_outline, 'bg': Colors.green.shade50};
+        return {
+          'color': _primaryGreen,
+          'icon': Icons.check_circle_outline,
+          'bg': Colors.green.shade50,
+        };
       case 'late':
-        return {'color': Colors.orange.shade700, 'icon': Icons.timer_outlined, 'bg': Colors.orange.shade50};
+        return {
+          'color': Colors.orange.shade700,
+          'icon': Icons.timer_outlined,
+          'bg': Colors.orange.shade50,
+        };
       case 'partial':
-        return {'color': Colors.amber.shade700, 'icon': Icons.error_outline, 'bg': Colors.amber.shade50};
+        return {
+          'color': Colors.amber.shade700,
+          'icon': Icons.error_outline,
+          'bg': Colors.amber.shade50,
+        };
       case 'absent':
-        return {'color': Colors.red.shade500, 'icon': Icons.cancel_outlined, 'bg': Colors.red.shade50};
+        return {
+          'color': Colors.red.shade500,
+          'icon': Icons.cancel_outlined,
+          'bg': Colors.red.shade50,
+        };
       default:
-        return {'color': Colors.grey, 'icon': Icons.help_outline, 'bg': Colors.grey.shade50};
+        return {
+          'color': Colors.grey,
+          'icon': Icons.help_outline,
+          'bg': Colors.grey.shade50,
+        };
     }
   }
 
@@ -112,7 +139,12 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           _buildHeader(),
           Expanded(
             child: _selectedEventId == null
-                ? const Center(child: Text("Please select an event to monitor.", style: TextStyle(color: Color(0xFF616161))))
+                ? const Center(
+                    child: Text(
+                      "Please select an event to monitor.",
+                      style: TextStyle(color: Color(0xFF616161)),
+                    ),
+                  )
                 : _buildLiveDashboard(),
           ),
         ],
@@ -126,7 +158,10 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
       padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
       decoration: BoxDecoration(
         color: _primaryGreen,
-        borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(24), bottomRight: Radius.circular(24)),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -138,13 +173,27 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                   IconButton(
                     tooltip: 'Back',
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
+                    icon: const Icon(
+                      Icons.arrow_back_ios,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Attendance Monitoring', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text('Real-time attendance tracking', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      Text(
+                        'Attendance Monitoring',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Real-time attendance tracking',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
                     ],
                   ),
                 ],
@@ -152,22 +201,39 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
             ],
           ),
           const SizedBox(height: 20),
-          
+
           // Event Dropdown Selector
           StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
+            stream: _firestore
+                .collection('events')
+                .orderBy('startTime', descending: true)
+                .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white))));
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.white));
-              
+              if (snapshot.hasError)
+                return const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(
+                    child: Text(
+                      "Couldn't load data. Check your internet connection.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                );
+              if (!snapshot.hasData)
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                );
+
               var events = snapshot.data!.docs;
-              
+
               // Auto-select first event if none is selected
               if (_selectedEventId == null && events.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   setState(() {
                     _selectedEventId = events.first.id;
-                    _selectedEventData = events.first.data() as Map<String, dynamic>;
+                    _selectedEventData =
+                        events.first.data() as Map<String, dynamic>;
                   });
                 });
               }
@@ -182,9 +248,16 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                   child: DropdownButton<String>(
                     isExpanded: true,
                     dropdownColor: _primaryGreen,
-                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                    icon: const Icon(
+                      Icons.keyboard_arrow_down,
+                      color: Colors.white,
+                    ),
                     value: _selectedEventId,
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
                     items: events.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
                       return DropdownMenuItem<String>(
@@ -195,7 +268,9 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                     onChanged: (value) {
                       setState(() {
                         _selectedEventId = value;
-                        _selectedEventData = events.firstWhere((doc) => doc.id == value).data() as Map<String, dynamic>;
+                        _selectedEventData =
+                            events.firstWhere((doc) => doc.id == value).data()
+                                as Map<String, dynamic>;
                       });
                     },
                   ),
@@ -215,9 +290,21 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
 
     return StreamBuilder<QuerySnapshot>(
       // Listen to attendance collection strictly for the selected event
-      stream: _firestore.collection('attendance').where('eventId', isEqualTo: _selectedEventId).snapshots(),
+      stream: _firestore
+          .collection('attendance')
+          .where('eventId', isEqualTo: _selectedEventId)
+          .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("Couldn't load data. Check your internet connection.", textAlign: TextAlign.center)));
+        if (snapshot.hasError)
+          return const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(
+              child: Text(
+                "Couldn't load data. Check your internet connection.",
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -233,7 +320,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
 
         // Build Combined List (Roster + Live Attendance)
         List<Map<String, dynamic>> combinedList = [];
-        
+
         int totalTurnout = 0;
         int present = 0;
         int late = 0;
@@ -248,19 +335,22 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           };
 
           String rawId = studentId.replaceAll('-', '');
-          var attendanceRecord = liveAttendance[studentId] ?? liveAttendance[rawId];
+          var attendanceRecord =
+              liveAttendance[studentId] ?? liveAttendance[rawId];
 
           if (attendanceRecord != null) {
             final status = attendanceRecord['status'] ?? 'Unknown';
             combinedItem['status'] = status;
             combinedItem['timeIn'] = attendanceRecord['timeIn'];
             combinedItem['timeOut'] = attendanceRecord['timeOut'];
-            
+
             totalTurnout++;
             if (status == 'Present') {
               present++;
-            } else if (status == 'Late') late++;
-            else if (status == 'Partial') partial++;
+            } else if (status == 'Late')
+              late++;
+            else if (status == 'Partial')
+              partial++;
           } else {
             combinedItem['status'] = 'Absent';
             combinedItem['timeIn'] = null;
@@ -272,17 +362,22 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
 
         // Calculate Stats based on roster and live attendance
         int rosterTotal = rosterCache.length;
-        double turnoutPercentage = rosterTotal == 0 ? 0.0 : (totalTurnout / rosterTotal) * 100;
+        double turnoutPercentage = rosterTotal == 0
+            ? 0.0
+            : (totalTurnout / rosterTotal) * 100;
 
         // Apply Filters & Search
         var filteredList = combinedList.where((data) {
           final status = data['status'];
           final studentId = data['studentId'].toString().toLowerCase();
           final name = data['name'].toString().toLowerCase();
-          
-          bool matchesFilter = _selectedFilter == 'All' || status == _selectedFilter;
-          bool matchesSearch = studentId.contains(_searchQuery.toLowerCase()) || name.contains(_searchQuery.toLowerCase());
-          
+
+          bool matchesFilter =
+              _selectedFilter == 'All' || status == _selectedFilter;
+          bool matchesSearch =
+              studentId.contains(_searchQuery.toLowerCase()) ||
+              name.contains(_searchQuery.toLowerCase());
+
           return matchesFilter && matchesSearch;
         }).toList();
 
@@ -290,18 +385,26 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
         for (var data in filteredList) {
           data['formattedName'] = formatAndGetLastName(data['name'] ?? '');
         }
-        filteredList.sort((a, b) => a['formattedName'].toString().toLowerCase().compareTo(b['formattedName'].toString().toLowerCase()));
+        filteredList.sort(
+          (a, b) => a['formattedName'].toString().toLowerCase().compareTo(
+            b['formattedName'].toString().toLowerCase(),
+          ),
+        );
 
         // Phase 2: Pagination
         int startIndex = currentPage * itemsPerPage;
-        int endIndex = (startIndex + itemsPerPage > filteredList.length) ? filteredList.length : startIndex + itemsPerPage;
-        
+        int endIndex = (startIndex + itemsPerPage > filteredList.length)
+            ? filteredList.length
+            : startIndex + itemsPerPage;
+
         List<Map<String, dynamic>> paginatedRoster = [];
         if (filteredList.isNotEmpty && startIndex < filteredList.length) {
           paginatedRoster = filteredList.sublist(startIndex, endIndex);
         }
 
-        int totalPages = filteredList.isEmpty ? 1 : (filteredList.length / itemsPerPage).ceil();
+        int totalPages = filteredList.isEmpty
+            ? 1
+            : (filteredList.length / itemsPerPage).ceil();
 
         return CustomScrollView(
           slivers: [
@@ -326,17 +429,43 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Total Turnout', style: TextStyle(color: Colors.white, fontSize: 12)),
+                              const Text(
+                                'Total Turnout',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              Text('${turnoutPercentage.toStringAsFixed(1)}%', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                              Text(
+                                '${turnoutPercentage.toStringAsFixed(1)}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              const Text('Checked In', style: TextStyle(color: Colors.white, fontSize: 12)),
+                              const Text(
+                                'Checked In',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              Text('$totalTurnout / $rosterTotal', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                              Text(
+                                '$totalTurnout / $rosterTotal',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -347,23 +476,27 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                     const SizedBox(height: 24),
                     _buildSearchAndFilter(),
                     const SizedBox(height: 24),
-                    Text('Students (${filteredList.length})', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
+                    Text(
+                      'Students (${filteredList.length})',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
             SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final data = paginatedRoster[index];
-                  // Pass the formatted name to the card
-                  final cardData = Map<String, dynamic>.from(data);
-                  cardData['name'] = data['formattedName'];
-                  return _buildStudentCard(cardData);
-                },
-                childCount: paginatedRoster.length,
-              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final data = paginatedRoster[index];
+                // Pass the formatted name to the card
+                final cardData = Map<String, dynamic>.from(data);
+                cardData['name'] = data['formattedName'];
+                return _buildStudentCard(cardData);
+              }, childCount: paginatedRoster.length),
             ),
             SliverToBoxAdapter(
               child: Padding(
@@ -378,7 +511,13 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                           ? () => setState(() => currentPage--)
                           : null,
                     ),
-                    Text('Page ${currentPage + 1} of $totalPages', style: TextStyle(fontWeight: FontWeight.bold, color: _darkText)),
+                    Text(
+                      'Page ${currentPage + 1} of $totalPages',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _darkText,
+                      ),
+                    ),
                     IconButton(
                       tooltip: 'Next page',
                       icon: const Icon(Icons.chevron_right),
@@ -399,17 +538,34 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
   Widget _buildEventDetailsCard() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_selectedEventData?['title'] ?? '', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
+          Text(
+            _selectedEventData?['title'] ?? '',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: _darkText,
+            ),
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.location_on_outlined, size: 16, color: Colors.grey.shade600),
+              Icon(
+                Icons.location_on_outlined,
+                size: 16,
+                color: Colors.grey.shade600,
+              ),
               const SizedBox(width: 8),
-              Text(_selectedEventData?['venueName'] ?? '', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              Text(
+                _selectedEventData?['venueName'] ?? '',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -417,7 +573,10 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
             children: [
               Icon(Icons.access_time, size: 16, color: Colors.grey.shade600),
               const SizedBox(width: 8),
-              Text(_formatDate(_selectedEventData?['startTime']), style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              Text(
+                _formatDate(_selectedEventData?['startTime']),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
             ],
           ),
         ],
@@ -429,20 +588,47 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
+      // Without this the grid adds the status-bar height as a blank gap on top.
+      padding: EdgeInsets.zero,
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
       childAspectRatio: 2.2,
       children: [
-        _buildStatCard('Total', total.toString(), Icons.people_outline, _darkText),
-        _buildStatCard('Present', present.toString(), Icons.check_circle_outline, _primaryGreen),
-        _buildStatCard('Late', late.toString(), Icons.timer_outlined, Colors.orange.shade700),
-        _buildStatCard('Partial', partial.toString(), Icons.error_outline, Colors.amber.shade700),
+        _buildStatCard(
+          'Total',
+          total.toString(),
+          Icons.people_outline,
+          _darkText,
+        ),
+        _buildStatCard(
+          'Present',
+          present.toString(),
+          Icons.check_circle_outline,
+          _primaryGreen,
+        ),
+        _buildStatCard(
+          'Late',
+          late.toString(),
+          Icons.timer_outlined,
+          Colors.orange.shade700,
+        ),
+        _buildStatCard(
+          'Partial',
+          partial.toString(),
+          Icons.error_outline,
+          Colors.amber.shade700,
+        ),
       ],
     );
   }
 
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -461,11 +647,25 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                 children: [
                   Icon(icon, size: 14, color: color),
                   const SizedBox(width: 4),
-                  Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),
-              Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _darkText)),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _darkText,
+                ),
+              ),
             ],
           ),
         ],
@@ -490,11 +690,14 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
             filled: true,
             fillColor: Colors.white,
             contentPadding: const EdgeInsets.symmetric(vertical: 0),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
           ),
         ),
         const SizedBox(height: 16),
-        
+
         // Filter Chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -510,9 +713,13 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
                   backgroundColor: Colors.white,
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey.shade700,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
                   ),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   onSelected: (selected) {
                     setState(() {
                       _selectedFilter = filter;
@@ -523,7 +730,7 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
               );
             }).toList(),
           ),
-        )
+        ),
       ],
     );
   }
@@ -548,17 +755,30 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(data['name'] ?? 'Unknown', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _darkText)),
+                Text(
+                  data['name'] ?? 'Unknown',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: _darkText,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('ID: ${data['studentId']} • ${data['program']} ${data['yearBlock']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                Text(
+                  'ID: ${data['studentId']} • ${data['program']} ${data['yearBlock']}',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                ),
                 const SizedBox(height: 8),
                 Text(
-                  status == 'Absent' 
-                      ? 'No Record / -' 
-                      : (status == 'Partial' 
-                          ? 'In: ${_formatTime(data['timeIn'])} • Out: ${_formatTime(data['timeOut'])}'
-                          : 'In: ${_formatTime(data['timeIn'])}'),
-                  style: const TextStyle(color: Color(0xFF616161), fontSize: 11),
+                  status == 'Absent'
+                      ? 'No Record / -'
+                      : (status == 'Partial'
+                            ? 'In: ${_formatTime(data['timeIn'])} • Out: ${_formatTime(data['timeOut'])}'
+                            : 'In: ${_formatTime(data['timeIn'])}'),
+                  style: const TextStyle(
+                    color: Color(0xFF616161),
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -577,10 +797,17 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
               children: [
                 Icon(style['icon'], size: 14, color: style['color']),
                 const SizedBox(width: 4),
-                Text(status, style: TextStyle(color: style['color'], fontSize: 12, fontWeight: FontWeight.bold)),
+                Text(
+                  status,
+                  style: TextStyle(
+                    color: style['color'],
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -595,18 +822,45 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
       onTap: (index) {
         if (index == 2) return; // Already on this tab
         if (index == 0) {
-          Navigator.popUntil(context, (route) => route.isFirst); // Dashboard is the root route
+          Navigator.popUntil(
+            context,
+            (route) => route.isFirst,
+          ); // Dashboard is the root route
         } else if (index == 1) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const ManageEventsScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const ManageEventsScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         } else if (index == 3) {
-          Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_, _, _) => const AdminSettingsScreen(), transitionDuration: Duration.zero));
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (_, _, _) => const AdminSettingsScreen(),
+              transitionDuration: Duration.zero,
+            ),
+          );
         }
       },
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'Dashboard'),
-        BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Events'),
-        BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Attendance'),
-        BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.dashboard_outlined),
+          label: 'Dashboard',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.calendar_today),
+          label: 'Events',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.insert_chart_outlined),
+          label: 'Reports',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.settings_outlined),
+          label: 'Settings',
+        ),
       ],
     );
   }

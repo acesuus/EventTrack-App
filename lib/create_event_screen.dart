@@ -465,8 +465,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               isExpanded: true,
               value: _eventType,
               items: const [
-                DropdownMenuItem(value: AttendancePolicy.eventTypeContinuous, child: Text('Continuous Stay (Type 2)')),
-                DropdownMenuItem(value: AttendancePolicy.eventTypeInOut, child: Text('Time In / Time Out (Type 1)')),
+                DropdownMenuItem(value: AttendancePolicy.eventTypeContinuous, child: Text('Continuous stay')),
+                DropdownMenuItem(value: AttendancePolicy.eventTypeInOut, child: Text('Time In / Time Out')),
               ],
               onChanged: (newValue) {
                 if (newValue != null && mounted) {

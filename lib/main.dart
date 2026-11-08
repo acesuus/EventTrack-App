@@ -1,20 +1,4 @@
-import 'package:flutter/material.dart';
+// Default `flutter run` target: the student app. Admin: -t lib/main_admin.dart.
+import 'main_student.dart' as student;
 
-void main() {
-  runApp(const MainApp());
-}
-
-class MainApp extends StatelessWidget {
-  const MainApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text('Hello World!'),
-        ),
-      ),
-    );
-  }
-}
+void main() => student.main();

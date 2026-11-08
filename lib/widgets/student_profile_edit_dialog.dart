@@ -202,7 +202,7 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
                         autofillHints: const [AutofillHints.email],
                         autocorrect: false,
                         decoration: _decoration(
-                          'name@psu.palawan.edu.ph',
+                          'student-id@psu.palawan.edu.ph',
                           Icons.mail_outline,
                         ),
                         validator: (value) {

@@ -286,7 +286,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                               autofillHints: const [AutofillHints.username],
                               autocorrect: false,
                               decoration: _inputDecoration(
-                                'admin@psu.palawan.edu.ph',
+                                _demoEmail.isNotEmpty
+                                    ? _demoEmail
+                                    : 'Enter your admin email',
                                 Icons.mail_outline,
                               ),
                               validator: (value) =>

@@ -12,7 +12,7 @@ service cloud.firestore {
         && request.auth.token.email is string;
     }
 
-    // A student ID is the digits of their PSU email: 202380358@psu.palawan.edu.ph -> 2023-8-0358.
+    // A student ID is the digits of their PSU email: 202312345@psu.palawan.edu.ph -> 2023-1-2345.
     // Must match studentIdFromEmail in lib/student_login_screen.dart.
     function ownsStudent(studentId) {
       return isVerifiedStudent()

@@ -11,7 +11,7 @@ import 'widgets/eventtrack_brand.dart';
 
 final _psuEmail = RegExp(r'^(\d{4})(\d)(\d{4})@psu\.palawan\.edu\.ph$');
 
-/// `202380358@psu.palawan.edu.ph` -> `2023-8-0358`, or null for any other email.
+/// `202312345@psu.palawan.edu.ph` -> `2023-1-2345`, or null for any other email.
 /// Must match `studentIdMatchesEmail` in firestore.rules.
 String? studentIdFromEmail(String email) {
   final m = _psuEmail.firstMatch(email.trim().toLowerCase());
@@ -102,7 +102,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     }
     if (studentIdFromEmail(_email) == null) {
       _showMessage(
-        'Use your PSU student email, like 202380358@psu.palawan.edu.ph.',
+        'Use your PSU email: your student ID (0000-0-0000) without dashes, then @psu.palawan.edu.ph.',
       );
       return;
     }
@@ -165,7 +165,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
       return;
     }
 
-    // The student ID comes from the email: 202380358@... -> 2023-8-0358.
+    // The student ID comes from the email digits, in 0000-0-0000 format.
     final studentId = studentIdFromEmail(_email)!;
     // Optional: use the name from the admin's roster if this student is on it.
     var rosterName = '';
@@ -354,7 +354,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                       if (_isActivating) ...[
                         const SizedBox(height: 8),
                         const Text(
-                          'Use your PSU student email (like 202380358@psu.palawan.edu.ph) and choose a password.',
+                          'Use your PSU email: your student ID (0000-0-0000) without dashes, then @psu.palawan.edu.ph. Then choose a password.',
                         ),
                       ],
                       const SizedBox(height: 24),
@@ -368,7 +368,7 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
                           autofillHints: const [AutofillHints.email],
                           textInputAction: TextInputAction.next,
                           decoration: _decoration(
-                            hint: '202380358@psu.palawan.edu.ph',
+                            hint: 'student-id@psu.palawan.edu.ph',
                             icon: Icons.mail_outline,
                           ),
                         ),
