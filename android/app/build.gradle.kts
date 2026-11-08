@@ -11,7 +11,7 @@ plugins {
 android {
     namespace = "ph.edu.psu.eventtrack"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "27.1.12297006" // installed NDK; plugins need any 27.x
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

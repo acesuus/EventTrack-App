@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const project = 'event-track-46f63';
 const email = process.env.EVENTTRACK_ADMIN_EMAIL;
 const password = process.env.EVENTTRACK_ADMIN_PASSWORD;
-const cli = path.join(process.env.APPDATA, 'npm/node_modules/firebase-tools/lib');
+const npmRoot = require('node:child_process').execSync('npm root -g').toString().trim();
+const cli = path.join(npmRoot, 'firebase-tools/lib');
 
 (async () => {
   if (!email || !password) throw Error('Set EVENTTRACK_ADMIN_EMAIL and EVENTTRACK_ADMIN_PASSWORD.');

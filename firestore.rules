@@ -6,40 +6,119 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.get('admin', false) == true;
     }
 
+    function isVerifiedStudent() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    // A student ID is the digits of their PSU email: 202380358@psu.palawan.edu.ph -> 2023-8-0358.
+    // Must match studentIdFromEmail in lib/student_login_screen.dart.
+    function ownsStudent(studentId) {
+      return isVerifiedStudent()
+        && studentId is string
+        && studentId.matches('^[0-9]{4}-[0-9]-[0-9]{4}$')
+        && studentId.replace('-', '') + '@psu.palawan.edu.ph' == request.auth.token.email;
+    }
+
+    // ROSTER (optional, for names): admins manage it; a student can read only their own row.
     match /students/{studentId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || ownsStudent(studentId);
+      allow write: if isAdmin();
     }
 
     match /settings/{settingId} {
       allow read, write: if isAdmin();
     }
 
-    // 1. USERS (Device Binding)
-    match /users/{userId} {
-      allow read: if true;
-      // Only allow creation/updates if it includes a device ID.
-      allow write: if request.resource.data.keys().hasAny(['registeredDeviceId', 'studentId']);
+    // STUDENT PROFILE + DEVICE BINDING
+    match /users/{studentId} {
+      allow read: if isAdmin() || ownsStudent(studentId);
+      allow create: if isAdmin() || ownsStudent(studentId);
+      // Only an admin can move an account to a different phone.
+      allow update: if isAdmin() || (ownsStudent(studentId) && (
+        resource.data.get('registeredDeviceId', '') == ''
+        || request.resource.data.get('registeredDeviceId', '') == resource.data.get('registeredDeviceId', '')
+      ));
+      allow delete: if isAdmin();
     }
 
-    // 2. EVENTS
+    // Which student each phone belongs to (one account per phone).
+    match /devices/{deviceId} {
+      allow get: if isAdmin() || isVerifiedStudent();
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (
+        ownsStudent(request.resource.data.studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'boundAt'])
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    // EVENTS
     match /events/{eventId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
-    // 3. ATTENDANCE (The Most Secure Collection)
+    // ATTENDANCE: document ID is "<studentId>_<eventId>".
+    // Location is checked on the phone; these rules stop students writing other
+    // students' records, editing finished records, or contradicting the event clock.
+    function attendanceStudent(docId) {
+      return docId.split('_')[0];
+    }
+
+    function eventOf(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)).data;
+    }
+
+    // Must match AttendancePolicy.pointsFor.
+    function expectedPoints(status, base) {
+      return status == 'Present' ? base
+        : (status in ['Late', 'Partial'] ? math.round(base / 2) : 0);
+    }
+
+    function basePoints(event) {
+      return event.get('basePoints', 10);
+    }
+
+    function validNewRecord(docId) {
+      let data = request.resource.data;
+      let event = eventOf(data.eventId);
+      let cutoff = event.startTime + duration.value(event.get('lateCutoffMinutes', 15), 'm');
+      return data.studentId == attendanceStudent(docId)
+        && docId == data.studentId + '_' + data.eventId
+        && data.timeIn is timestamp
+        && data.timeIn <= request.time + duration.value(5, 'm')
+        && data.timeIn >= event.startTime - duration.value(event.get('checkInOpenMinutesBeforeStart', 15) + 5, 'm')
+        && data.timeIn <= event.endTime
+        && data.initialStatus in ['Present', 'Late']
+        && (data.timeIn <= cutoff || data.initialStatus == 'Late')
+        && data.status in [data.initialStatus, 'Partial']
+        && data.pointsAwarded == expectedPoints(data.status, basePoints(event));
+    }
+
+    function validUpdate() {
+      let before = resource.data;
+      let data = request.resource.data;
+      let initial = before.get('initialStatus', before.get('status', ''));
+      return before.get('timeOut', null) == null
+        && data.studentId == before.studentId
+        && data.eventId == before.eventId
+        && data.timeIn == before.timeIn
+        && data.get('initialStatus', initial) == initial
+        && data.status in [initial, 'Partial']
+        && data.pointsAwarded == expectedPoints(data.status, basePoints(eventOf(data.eventId)));
+    }
+
     match /attendance/{docId} {
-      allow read: if true;
-
-      // CREATION: A student can only check in if they provide their ID and a Time In.
-      allow create: if request.resource.data.keys().hasAll(['studentId', 'eventId', 'status', 'timeIn']);
-
-      // UPDATE: If a student leaves early (Partial), they are ONLY allowed to update the 'timeOut' and 'status'.
-      // They are strictly FORBIDDEN from altering their original 'timeIn'.
-      allow update: if isAdmin() || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['timeOut', 'status']);
-
-      // DELETION: Students can NEVER delete an attendance record to hide that they were late or partial.
-      allow delete: if false;
+      allow get: if isAdmin() || ownsStudent(attendanceStudent(docId));
+      allow list: if isAdmin() || ownsStudent(resource.data.studentId);
+      allow create: if isAdmin()
+        || (ownsStudent(attendanceStudent(docId)) && validNewRecord(docId));
+      allow update: if isAdmin()
+        || (ownsStudent(attendanceStudent(docId)) && validUpdate());
+      // Students can never delete a record to hide being late or partial.
+      allow delete: if isAdmin();
     }
   }
 }

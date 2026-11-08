@@ -60,6 +60,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                   _instructionRow('B', 'Full Name (Juan D. Cruz)'),
                   _instructionRow('C', 'Program (BSCS, BSIT, BSIS)'),
                   _instructionRow('D', 'Year & Block (1-A)'),
+                  _instructionRow('E', 'PSU Email (juan.cruz@psu.palawan.edu.ph)'),
                 ],
               ),
               const SizedBox(height: 12),
@@ -67,6 +68,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 '• The first row is treated as a header and will be skipped.\n'
                 '• Student ID may be written with or without dashes.\n'
                 '• Year & Block must start with the year level (1-4), e.g. 3-B.\n'
+                '• Students log in with the PSU email in column E.\n'
                 '• Existing students with the same ID will be updated.',
                 style: TextStyle(
                   fontSize: 12,
@@ -171,11 +173,16 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
               : rawId;
 
           final docRef = firestore.collection('students').doc(finalId);
+          final email = row.length > 4
+              ? row[4].toString().trim().toLowerCase()
+              : '';
           final data = {
             'studentId': finalId,
             'name': row.length > 1 ? row[1].toString() : '',
             'program': row.length > 2 ? row[2].toString() : '',
             'yearBlock': row.length > 3 ? row[3].toString() : '',
+            // Keep an existing email when the column is blank.
+            if (email.isNotEmpty) 'email': email,
           };
 
           batch.set(docRef, data, SetOptions(merge: true));
@@ -428,6 +435,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     final TextEditingController miCtrl = TextEditingController();
     final TextEditingController lastNameCtrl = TextEditingController();
     final TextEditingController idCtrl = TextEditingController();
+    final TextEditingController emailCtrl = TextEditingController();
 
     String program = 'BSCS';
     String yearBlock = '';
@@ -470,6 +478,13 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                         labelText: 'Student ID',
                       ),
                     ),
+                    TextFormField(
+                      controller: emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'PSU Email (used to log in)',
+                      ),
+                    ),
                     DropdownButtonFormField<String>(
                       initialValue: program,
                       decoration: const InputDecoration(labelText: 'Program'),
@@ -497,12 +512,14 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     String rawId = idCtrl.text.replaceAll('-', '').trim();
+                    final email = emailCtrl.text.trim().toLowerCase();
                     if (rawId.isEmpty ||
                         firstNameCtrl.text.isEmpty ||
-                        lastNameCtrl.text.isEmpty) {
+                        lastNameCtrl.text.isEmpty ||
+                        !email.contains('@')) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Please fill required fields.'),
+                          content: Text('Fill in name, Student ID and a valid email.'),
                         ),
                       );
                       return;
@@ -526,6 +543,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                             'name': fullName,
                             'program': program,
                             'yearBlock': yearBlock,
+                            'email': email,
                           });
                       if (!context.mounted) return;
                       Navigator.pop(context);
@@ -617,6 +635,54 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
+  /// Lets a student register a new phone (e.g. after reinstalling the app).
+  Future<void> _resetStudentDevice(
+    BuildContext dialogContext,
+    String studentId,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: dialogContext,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset device?'),
+        content: Text(
+          '$studentId will be able to log in on a new phone. Their current phone will no longer be registered.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset device'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final userRef = firestore.collection('users').doc(studentId);
+      final deviceId =
+          (await userRef.get()).data()?['registeredDeviceId']?.toString() ?? '';
+      final batch = firestore.batch();
+      if (deviceId.isNotEmpty) {
+        batch.delete(firestore.collection('devices').doc(deviceId));
+      }
+      batch.set(userRef, {'registeredDeviceId': ''}, SetOptions(merge: true));
+      await batch.commit();
+      if (!dialogContext.mounted) return;
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text('Device reset. The student can log in on a new phone.')),
+      );
+    } catch (e) {
+      if (!dialogContext.mounted) return;
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text("Couldn't reset the device. Check your connection.")),
+      );
+    }
+  }
+
   void _showUpdateStudentForm(
     String studentId,
     Map<String, dynamic> existingData,
@@ -627,6 +693,9 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     String program = existingData['program'] ?? 'BSCS';
     final TextEditingController yearBlockCtrl = TextEditingController(
       text: existingData['yearBlock'] ?? '',
+    );
+    final TextEditingController emailCtrl = TextEditingController(
+      text: existingData['email'] ?? '',
     );
 
     if (!['BSCS', 'BSIT', 'BSIS'].contains(program)) {
@@ -668,10 +737,21 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                         labelText: 'Year & Block (e.g., 1-A)',
                       ),
                     ),
+                    TextFormField(
+                      controller: emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'PSU Email (used to log in)',
+                      ),
+                    ),
                   ],
                 ),
               ),
               actions: [
+                TextButton(
+                  onPressed: () => _resetStudentDevice(context, studentId),
+                  child: const Text('Reset device'),
+                ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Cancel'),
@@ -693,6 +773,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                             'name': nameCtrl.text.trim(),
                             'program': program,
                             'yearBlock': yearBlockCtrl.text.trim(),
+                            'email': emailCtrl.text.trim().toLowerCase(),
                           });
                       if (!context.mounted) return;
                       Navigator.pop(context);

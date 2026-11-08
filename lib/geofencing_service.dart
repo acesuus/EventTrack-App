@@ -5,9 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 class GeofencingService {
-  static DateTime? _lastAttemptTime;
-  static int _failedAttempts = 0;
-  static DateTime? _lockoutEndTime;
+  static bool? _isPhysicalDevice;
 
   static Future<bool> _isEnvironmentSecure(Position position) async {
     // SECURITY: Reject mock locations (GPS spoofing)
@@ -16,14 +14,13 @@ class GeofencingService {
     }
 
     if (!kIsWeb) {
-      final deviceInfo = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfo.androidInfo;
-        if (!androidInfo.isPhysicalDevice) return false;
-      } else if (Platform.isIOS) {
-        final iosInfo = await deviceInfo.iosInfo;
-        if (!iosInfo.isPhysicalDevice) return false;
-      }
+      // Cached: called for every location update while tracking.
+      _isPhysicalDevice ??= Platform.isAndroid
+          ? (await DeviceInfoPlugin().androidInfo).isPhysicalDevice
+          : Platform.isIOS
+          ? (await DeviceInfoPlugin().iosInfo).isPhysicalDevice
+          : true;
+      if (!_isPhysicalDevice!) return false;
     }
     return true;
   }
@@ -31,17 +28,6 @@ class GeofencingService {
   /// Validates if a student's current position is inside the event's polygon geofence.
   /// Uses the Ray-Casting (Point-in-Polygon) algorithm.
   static Future<bool> isStudentInsideEvent(Position studentPos, Map<String, dynamic> eventCoords, {bool useMock = false, Position? mockPosition}) async {
-    final now = DateTime.now();
-
-    if (_lockoutEndTime != null && _lockoutEndTime!.isAfter(now)) {
-      throw Exception('SECURITY_VIOLATION: Too many failed attempts. Account temporarily locked.');
-    }
-
-    if (_lastAttemptTime != null && now.difference(_lastAttemptTime!) < const Duration(seconds: 2)) {
-      throw Exception('SECURITY_VIOLATION: Request throttled. Please wait before trying again.');
-    }
-    _lastAttemptTime = now;
-
     if (useMock) {
       // Fallback mock position defaults to Gymnasium if no specific mock is provided
       studentPos = mockPosition ?? Position(
@@ -104,18 +90,7 @@ class GeofencingService {
       }
 
       // If the number of intersections is Odd, the point is INSIDE the polygon.
-      bool isInside = (intersectCount % 2 != 0);
-
-      if (isInside) {
-        _failedAttempts = 0;
-      } else {
-        _failedAttempts++;
-        if (_failedAttempts >= 3) {
-          _lockoutEndTime = now.add(const Duration(seconds: 30));
-        }
-      }
-
-      return isInside;
+      return intersectCount % 2 != 0;
     } catch (e) {
       debugPrint("GeofencingService Error calculating bounds: $e");
       return false; // Fail securely by marking them outside if data is corrupted

@@ -52,3 +52,4 @@ firebase-backups/
 
 # Local chat screenshots and attachments are not application assets.
 .codex-attachments/
+/apk/

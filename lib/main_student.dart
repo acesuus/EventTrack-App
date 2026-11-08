@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,8 +21,14 @@ void main() async {
   );
 
   final prefs = await SharedPreferences.getInstance();
-  final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
   final studentId = prefs.getString('studentId') ?? '';
+  // Sessions from before student sign-in existed have no Firebase user: log in again.
+  final user = await FirebaseAuth.instance.authStateChanges().first;
+  final isLoggedIn =
+      (prefs.getBool('isLoggedIn') ?? false) &&
+      studentId.isNotEmpty &&
+      user != null &&
+      user.emailVerified;
   final studentName = prefs.getString('studentName') ?? 'Student';
   final hasConsented = prefs.getBool('hasConsented') ?? false;
 

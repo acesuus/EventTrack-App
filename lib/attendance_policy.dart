@@ -1,25 +1,51 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// One attendance window of a Time In/Out event (the morning or afternoon half).
+typedef AttendanceHalf = ({DateTime start, DateTime end});
+
 class AttendancePolicy {
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
   static const int defaultLateCutoffMinutes = 15;
   static const int allowedOutsideSeconds = 15 * 60;
+  static const int defaultCheckInOpenMinutes = 15;
+
+  /// Check-out for a half opens this many minutes before the half ends.
+  static const int checkOutOpenMinutesBeforeEnd = 15;
+
+  /// How often an inside reading is saved while the student stays at the venue.
+  static const int heartbeatSeconds = 2 * 60;
+
+  /// After this long without a saved inside reading, the student counts as gone.
+  static const int heartbeatToleranceSeconds = 5 * 60;
 
   static const String eventTypeInOut = 'type1_in_out';
   static const String eventTypeContinuous = 'type2_continuous';
 
-  static int getPointsForStatus(String status) {
+  /// Must match expectedPoints() in firestore.rules.
+  static int pointsFor(String status, int basePoints) {
     switch (status) {
       case 'Present':
-        return 10;
+        return basePoints;
       case 'Late':
       case 'Partial':
-        return 5;
-      case 'Absent':
+        return (basePoints / 2).round();
       default:
         return 0;
     }
   }
+
+  /// Legacy fallback for records saved before pointsAwarded existed.
+  static int getPointsForStatus(String status) => pointsFor(status, 10);
+
+  static int basePointsOf(Map<String, dynamic> event) =>
+      int.tryParse(event['basePoints']?.toString() ?? '') ?? 10;
+
+  static int lateCutoffOf(Map<String, dynamic> event) =>
+      (event['lateCutoffMinutes'] as num?)?.toInt() ?? defaultLateCutoffMinutes;
+
+  static int checkInOpenOf(Map<String, dynamic> event) =>
+      (event['checkInOpenMinutesBeforeStart'] as num?)?.toInt() ??
+      defaultCheckInOpenMinutes;
 
   static String determineInitialStatus({
     required DateTime checkInTime,
@@ -46,40 +72,219 @@ class AttendancePolicy {
     return !isFinalizedRecord(timeOut);
   }
 
-  /// Opening or resuming an event verifies attendance without checking out.
-  static Map<String, dynamic> verifyInOutAttendance({
+  // ---------------------------------------------------------------------------
+  // Time In/Out events: a morning and an afternoon half, each needs a check-in
+  // and a check-out at the venue. Both halves = initial status, otherwise Partial.
+  // ---------------------------------------------------------------------------
+
+  /// Events created before halves existed have a single half spanning the event.
+  static List<AttendanceHalf> inOutHalves(Map<String, dynamic> event) {
+    DateTime? at(String key) => (event[key] as Timestamp?)?.toDate();
+    final mStart = at('morningStartTime');
+    final mEnd = at('morningEndTime');
+    final aStart = at('afternoonStartTime');
+    final aEnd = at('afternoonEndTime');
+    if (mStart != null && mEnd != null && aStart != null && aEnd != null) {
+      return [(start: mStart, end: mEnd), (start: aStart, end: aEnd)];
+    }
+    return [(start: at('startTime')!, end: at('endTime')!)];
+  }
+
+  /// The half whose window (check-in opening to its end) contains [now], or null.
+  static int? halfIndexAt(
+    List<AttendanceHalf> halves,
+    DateTime now, {
+    int checkInOpenMinutes = defaultCheckInOpenMinutes,
+  }) {
+    for (var i = 0; i < halves.length; i++) {
+      final opens = halves[i].start.subtract(
+        Duration(minutes: checkInOpenMinutes),
+      );
+      if (!now.isBefore(opens) && !now.isAfter(halves[i].end)) return i;
+    }
+    return null;
+  }
+
+  static DateTime checkOutOpensAt(AttendanceHalf half) => half.end.subtract(
+    const Duration(minutes: checkOutOpenMinutesBeforeEnd),
+  );
+
+  static List<Map<String, dynamic>> halvesOf(
+    Map<String, dynamic> data,
+    int count,
+  ) {
+    final raw = data['halves'] as List<dynamic>? ?? const [];
+    return List.generate(count, (i) {
+      if (i < raw.length && raw[i] is Map) {
+        final m = Map<String, dynamic>.from(raw[i] as Map);
+        return {'timeIn': m['timeIn'], 'timeOut': m['timeOut']};
+      }
+      return <String, dynamic>{'timeIn': null, 'timeOut': null};
+    });
+  }
+
+  static String inOutFinalStatus(Map<String, dynamic> data, int halfCount) {
+    final initial = (data['initialStatus'] ?? data['status'] ?? 'Present')
+        .toString();
+    final complete = halvesOf(
+      data,
+      halfCount,
+    ).where((h) => h['timeIn'] != null && h['timeOut'] != null).length;
+    return complete == halfCount ? initial : 'Partial';
+  }
+
+  /// Applies one verified location to a Time In/Out record.
+  /// Returns the updated record, or null when nothing changed.
+  static Map<String, dynamic>? verifyInOutAttendance({
+    required Map<String, dynamic> existing,
+    required Timestamp verifiedAt,
+    required List<AttendanceHalf> halves,
+    required bool isInside,
+    bool checkOutRequested = false,
+    int lateCutoffMinutes = defaultLateCutoffMinutes,
+    int checkInOpenMinutes = defaultCheckInOpenMinutes,
+  }) {
+    if (existing['timeOut'] != null || !isInside) return null;
+    final now = verifiedAt.toDate();
+    final index = halfIndexAt(
+      halves,
+      now,
+      checkInOpenMinutes: checkInOpenMinutes,
+    );
+    if (index == null) return null;
+
+    final data = Map<String, dynamic>.from(existing);
+    final parts = halvesOf(data, halves.length);
+    final part = parts[index];
+
+    if (part['timeIn'] == null) {
+      part['timeIn'] = verifiedAt;
+      if (data['timeIn'] == null) {
+        final status = determineInitialStatus(
+          checkInTime: now,
+          eventStart: halves.first.start,
+          lateCutoffMinutes: lateCutoffMinutes,
+        );
+        data.addAll({
+          'timeIn': verifiedAt,
+          'status': status,
+          'initialStatus': status,
+        });
+      }
+    } else if (checkOutRequested &&
+        part['timeOut'] == null &&
+        !now.isBefore(checkOutOpensAt(halves[index]))) {
+      part['timeOut'] = verifiedAt;
+    } else {
+      return null;
+    }
+
+    data['halves'] = parts;
+    if (parts.every((h) => h['timeOut'] != null)) {
+      data['timeOut'] = verifiedAt;
+      data['status'] = inOutFinalStatus(data, halves.length);
+    }
+    return data;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Continuous Stay events: time away from the venue is summed from sessions.
+  // ---------------------------------------------------------------------------
+
+  /// Applies one location reading to a Continuous Stay record.
+  /// Returns the updated record, or null when nothing needs saving.
+  static Map<String, dynamic>? verifyContinuousAttendance({
     required Map<String, dynamic> existing,
     required Timestamp verifiedAt,
     required DateTime eventStart,
     required bool isInside,
-    bool checkOutRequested = false,
     int lateCutoffMinutes = defaultLateCutoffMinutes,
   }) {
-    final data = Map<String, dynamic>.from(existing);
-    if (data['timeOut'] != null || !isInside) return data;
-    if (data['timeIn'] == null) {
+    if (existing['timeOut'] != null) return null;
+
+    if (existing['timeIn'] == null) {
+      if (!isInside) return null;
       final status = determineInitialStatus(
         checkInTime: verifiedAt.toDate(),
         eventStart: eventStart,
         lateCutoffMinutes: lateCutoffMinutes,
       );
-      data.addAll({
-        'timeIn': verifiedAt,
-        'status': status,
-        'initialStatus': status,
-      });
-    } else if (checkOutRequested) {
-      data['timeOut'] = verifiedAt;
+      final record = AttendanceSessionRecord.createInitial(
+        initialStatus: status,
+        startedAt: verifiedAt,
+      );
+      return {...existing, ...record.sessionFields(), 'lastVerified': verifiedAt};
     }
-    return data;
+
+    final lastSeen = existing['lastVerified'] as Timestamp?;
+    final record = AttendanceSessionRecord.fromFirestore(
+      existing,
+    ).bootstrapLegacyIfNeeded(fallbackStart: lastSeen ?? verifiedAt);
+
+    // If no inside reading was saved for a while (app closed, phone off),
+    // the student left when the last reading went stale.
+    final staleAt = lastSeen == null
+        ? null
+        : lastSeen.toDate().add(
+            const Duration(seconds: heartbeatToleranceSeconds),
+          );
+    final wentStale =
+        record.hasOpenSession &&
+        staleAt != null &&
+        staleAt.isBefore(verifiedAt.toDate());
+    var next = wentStale
+        ? record.leaveGeofence(Timestamp.fromDate(staleAt))
+        : record;
+    next = isInside ? next.enterGeofence(verifiedAt) : next.leaveGeofence(verifiedAt);
+
+    final sessionsChanged =
+        next.sessions.length != record.sessions.length ||
+        next.hasOpenSession != record.hasOpenSession;
+    final heartbeatDue =
+        isInside &&
+        (lastSeen == null ||
+            verifiedAt.toDate().difference(lastSeen.toDate()).inSeconds >=
+                heartbeatSeconds);
+    if (!sessionsChanged && !heartbeatDue) return null;
+
+    return {
+      ...existing,
+      ...next.sessionFields(),
+      if (isInside) 'lastVerified': verifiedAt,
+    };
   }
 
-  static bool shouldAutoFinalize({
-    required Timestamp? timeOut,
-    required DateTime eventEnd,
-    required DateTime now,
-  }) {
-    return timeOut == null && !eventEnd.isAfter(now);
+  // ---------------------------------------------------------------------------
+  // End of event
+  // ---------------------------------------------------------------------------
+
+  /// Closes a record once its event has ended.
+  /// Returns the fields to save, or null when the record is not due.
+  static Map<String, dynamic>? finalizeIfEnded(
+    Map<String, dynamic> data,
+    Map<String, dynamic> event,
+    DateTime now,
+  ) {
+    final end = (event['endTime'] as Timestamp?)?.toDate();
+    if (end == null || data['timeOut'] != null || end.isAfter(now)) return null;
+    final endTs = Timestamp.fromDate(end);
+
+    final Map<String, dynamic> out;
+    final type = (event['eventType'] ?? data['eventType'])?.toString();
+    if (type == eventTypeInOut) {
+      out = {
+        ...data,
+        'timeOut': endTs,
+        'status': inOutFinalStatus(data, inOutHalves(event).length),
+      };
+    } else {
+      final record = AttendanceSessionRecord.fromFirestore(
+        data,
+      ).finalize(endTs, lastSeen: data['lastVerified'] as Timestamp?);
+      out = {...data, ...record.sessionFields()};
+    }
+    out['pointsAwarded'] = pointsFor(out['status'].toString(), basePointsOf(event));
+    return out;
   }
 }
 
@@ -248,7 +453,9 @@ class AttendanceSessionRecord {
     );
   }
 
-  AttendanceSessionRecord finalize(Timestamp at) {
+  /// Closes the record at [at]. An open session is closed when the last
+  /// inside reading ([lastSeen]) went stale, so silent absences count as away.
+  AttendanceSessionRecord finalize(Timestamp at, {Timestamp? lastSeen}) {
     if (isFinalized) return this;
 
     final normalized = bootstrapLegacyIfNeeded(fallbackStart: at);
@@ -260,8 +467,21 @@ class AttendanceSessionRecord {
       final lastTimeOut = lastSession['timeOut'] as Timestamp?;
 
       if (lastTimeOut == null) {
-        lastSession['timeOut'] = at;
+        var closeAt = at;
+        if (lastSeen != null) {
+          final staleAt = lastSeen.toDate().add(
+            const Duration(seconds: AttendancePolicy.heartbeatToleranceSeconds),
+          );
+          final sessionStart = (lastSession['timeIn'] as Timestamp).toDate();
+          if (staleAt.isBefore(at.toDate())) {
+            closeAt = Timestamp.fromDate(
+              staleAt.isBefore(sessionStart) ? sessionStart : staleAt,
+            );
+          }
+        }
+        lastSession['timeOut'] = closeAt;
         updatedSessions[updatedSessions.length - 1] = lastSession;
+        updatedOutsideSeconds += _positiveDiffSeconds(closeAt, at);
       } else {
         updatedOutsideSeconds += _positiveDiffSeconds(lastTimeOut, at);
       }
@@ -282,6 +502,18 @@ class AttendanceSessionRecord {
       sessions: updatedSessions,
     );
   }
+
+  /// Record fields without the student/event identity.
+  Map<String, dynamic> sessionFields() => {
+    'schemaVersion': AttendancePolicy.schemaVersion,
+    'eventType': eventType,
+    'initialStatus': initialStatus,
+    'status': status,
+    'timeIn': timeIn,
+    'timeOut': timeOut,
+    'totalOutsideSeconds': totalOutsideSeconds,
+    'sessions': sessions,
+  };
 
   Map<String, dynamic> toFirestoreFields({
     required String studentId,

@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:device_info_plus/device_info_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as fp;
@@ -13,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 import 'attendance_policy.dart';
+import 'device_binding.dart';
 import 'event_tracking_screen.dart';
 import 'joined_events_store.dart';
 import 'student_photo.dart';
@@ -56,158 +56,8 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   Timer? _clockRefreshTimer;
   bool _isSyncingAttendance = false;
 
-  bool _isOfflineMode = false;
-
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
-
-  Future<void> _syncOfflineData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final queueStr = prefs.getString('offline_attendance_queue');
-    if (queueStr == null || queueStr.isEmpty) {
-      await prefs.remove('cached_today_events');
-      return;
-    }
-
-    try {
-      final List<dynamic> queue = jsonDecode(queueStr);
-      for (final item in queue) {
-        final data = Map<String, dynamic>.from(item);
-        final String eventId = data['eventId'];
-        final String eventName = data['eventName'];
-        final String status = data['status'];
-        final int pointsAwarded =
-            data['pointsAwarded'] ??
-            AttendancePolicy.getPointsForStatus(status);
-        final String timestampStr = data['timestamp'];
-
-        final docRef = _firestore
-            .collection('attendance')
-            .doc('${widget.studentId}_$eventId');
-
-        await docRef.set({
-          'studentId': widget.studentId,
-          'eventId': eventId,
-          'eventName': eventName,
-          'eventTitle': eventName,
-          'status': status,
-          'pointsAwarded': pointsAwarded,
-          'timeIn': Timestamp.fromDate(DateTime.parse(timestampStr)),
-        }, SetOptions(merge: true));
-      }
-
-      await prefs.remove('offline_attendance_queue');
-      await prefs.remove('cached_today_events');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Offline records successfully synced.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Sync failed. Please check your internet connection and try again.',
-            ),
-          ),
-        );
-        setState(() => _isOfflineMode = true);
-      }
-    }
-  }
-
-  Future<void> _toggleOfflineMode(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (value) {
-      try {
-        final now = DateTime.now();
-        final startOfDay = DateTime(now.year, now.month, now.day);
-        final endOfDay = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          23,
-          59,
-          59,
-          999,
-        );
-
-        final snapshot = await _firestore
-            .collection('events')
-            .where(
-              'startTime',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
-            )
-            .where(
-              'startTime',
-              isLessThanOrEqualTo: Timestamp.fromDate(endOfDay),
-            )
-            .get(const GetOptions(source: Source.server));
-
-        List<Map<String, dynamic>> sanitizedEvents = [];
-        for (var doc in snapshot.docs) {
-          final data = doc.data();
-          data['id'] = doc.id;
-
-          if (data['startTime'] is Timestamp) {
-            data['startTime'] = (data['startTime'] as Timestamp)
-                .toDate()
-                .toIso8601String();
-          }
-          if (data['endTime'] is Timestamp) {
-            data['endTime'] = (data['endTime'] as Timestamp)
-                .toDate()
-                .toIso8601String();
-          }
-          if (data['createdAt'] is Timestamp) {
-            data['createdAt'] = (data['createdAt'] as Timestamp)
-                .toDate()
-                .toIso8601String();
-          }
-
-          if (data['polygonPoints'] is List) {
-            final points = data['polygonPoints'] as List<dynamic>;
-            final sanitizedPoints = points.map((p) {
-              if (p is GeoPoint) {
-                return {'lat': p.latitude, 'lng': p.longitude};
-              }
-              return p;
-            }).toList();
-            data['polygonPoints'] = sanitizedPoints;
-          }
-
-          sanitizedEvents.add(data);
-        }
-
-        await prefs.setString(
-          'cached_today_events',
-          jsonEncode(sanitizedEvents),
-        );
-      } catch (e) {
-        debugPrint("Pre-load fetch failed: $e");
-      }
-      await _firestore.disableNetwork();
-      setState(() => _isOfflineMode = true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Data pre-loaded. App is now in Offline Mode."),
-          ),
-        );
-      }
-    } else {
-      await _firestore.enableNetwork();
-      await _syncOfflineData();
-      setState(() => _isOfflineMode = false);
-      if (mounted && !_isOfflineMode) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("App is Online. Attendance synced.")),
-        );
-      }
-    }
-  }
 
   @override
   void initState() {
@@ -248,18 +98,21 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   }
 
   Future<void> _handleLogout() async {
-    final prefs = await SharedPreferences.getInstance();
-    final hasUnsynced =
-        (prefs.getString('offline_attendance_queue') ?? '').isNotEmpty;
+    // Attendance saved offline is queued by Firestore under this login, so it
+    // must reach the server before signing out or it would be rejected.
+    final synced = await _firestore
+        .waitForPendingWrites()
+        .then((_) => true)
+        .timeout(const Duration(seconds: 3), onTimeout: () => false);
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Log out?'),
         content: Text(
-          hasUnsynced
-              ? 'You have attendance records saved offline that have not synced yet. They will stay on this phone and sync after you log back in.'
-              : 'You will need to log in again to track attendance.',
+          synced
+              ? 'You will need to log in again to track attendance.'
+              : 'Some attendance has not synced yet. Connect to the internet and wait a moment before logging out, or it will be lost.',
         ),
         actions: [
           TextButton(
@@ -268,17 +121,18 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Log out'),
+            child: Text(synced ? 'Log out' : 'Log out anyway'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
-    // Only clear the session; keep the offline attendance queue so records are never lost.
-    final queue = prefs.getString('offline_attendance_queue');
-    await prefs.clear();
-    if (queue != null) {
-      await prefs.setString('offline_attendance_queue', queue);
+    await FirebaseAuth.instance.signOut();
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys()) {
+      if (!DeviceBinding.keysToKeepOnLogout.contains(key)) {
+        await prefs.remove(key);
+      }
     }
     if (!mounted) return;
 
@@ -312,7 +166,9 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
       for (final attendanceDoc in attendanceSnapshot.docs) {
         final attendanceData = attendanceDoc.data();
         final eventId = attendanceData['eventId']?.toString();
-        if (eventId == null || eventId.isEmpty) {
+        if (eventId == null ||
+            eventId.isEmpty ||
+            attendanceData['timeOut'] != null) {
           continue;
         }
 
@@ -343,140 +199,24 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     }
   }
 
+  /// Closes this student's record once its event has ended.
   Future<bool> _normalizeAttendanceRecord({
     required DocumentReference<Map<String, dynamic>> attendanceRef,
     required Map<String, dynamic> attendanceData,
     required Map<String, dynamic> eventData,
     required DateTime now,
   }) async {
-    var record = AttendanceSessionRecord.fromFirestore(attendanceData);
-    var changed = false;
-
-    final fallbackStart =
-        attendanceData['timeIn'] as Timestamp? ??
-        eventData['startTime'] as Timestamp? ??
-        Timestamp.now();
-
-    if (record.needsLegacyBootstrap) {
-      record = record.bootstrapLegacyIfNeeded(fallbackStart: fallbackStart);
-      changed = true;
-    }
-
-    final eventEnd = eventData['endTime'] as Timestamp?;
-    if (eventEnd != null &&
-        AttendancePolicy.shouldAutoFinalize(
-          timeOut: record.timeOut,
-          eventEnd: eventEnd.toDate(),
-          now: now,
-        )) {
-      record = record.finalize(eventEnd);
-      changed = true;
-    }
-
-    if (!changed) {
-      return false;
-    }
-
-    // FIX APPLIED HERE: Removed 'await' to allow offline fire-and-forget
-    attendanceRef.set(
-      record.toFirestoreFields(
-        studentId: widget.studentId,
-        eventId: attendanceData['eventId']?.toString() ?? '',
-        eventTitle:
-            attendanceData['eventTitle']?.toString() ??
-            eventData['title']?.toString() ??
-            'Event',
-      ),
-      SetOptions(merge: true),
+    final done = AttendancePolicy.finalizeIfEnded(
+      attendanceData,
+      eventData,
+      now,
     );
-
+    if (done == null) return false;
+    // Not awaited: offline, Firestore queues the write.
+    attendanceRef.set(done, SetOptions(merge: true)).catchError((Object e) {
+      debugPrint('Could not finalize attendance: $e');
+    });
     return true;
-  }
-
-  Future<String> _getHardwareFingerprint() async {
-    if (kIsWeb) return 'web_browser_device';
-    final deviceInfo = DeviceInfoPlugin();
-    if (Platform.isAndroid) {
-      final androidInfo = await deviceInfo.androidInfo;
-      return androidInfo.id;
-    } else if (Platform.isIOS) {
-      final iosInfo = await deviceInfo.iosInfo;
-      return iosInfo.identifierForVendor ?? 'unknown_ios_id';
-    }
-    throw UnsupportedError('Unsupported platform for device binding');
-  }
-
-  Future<void> _enforceDeviceBinding(String studentId) async {
-    final fingerprint = await _getHardwareFingerprint();
-    final userDocRef = _firestore.collection('users').doc(studentId);
-    final prefs = await SharedPreferences.getInstance();
-
-    // 1. LOCAL BINDING (Anti-Clear Data protection for Offline Mode)
-    final localBoundId = prefs.getString('bound_student_id');
-    if (localBoundId != null && localBoundId != studentId) {
-      throw Exception(
-        'SECURITY_VIOLATION: This phone is permanently bound to Student ID: $localBoundId. Multiple accounts on one device are prohibited.',
-      );
-    }
-
-    // 2. CLOUD BINDING (Cross-references Firestore to stop 1-device-to-many-accounts)
-    DocumentSnapshot<Map<String, dynamic>>? userDoc;
-    try {
-      userDoc = await userDocRef.get(
-        GetOptions(
-          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
-        ),
-      );
-    } catch (e) {
-      if (_isOfflineMode)
-        return; // Rely on the localBoundId check above if offline
-      rethrow;
-    }
-
-    // Helper function to claim the device in the cloud
-    Future<void> claimDevice() async {
-      if (_isOfflineMode) return; // Cannot claim a new device while offline
-
-      // Cloud Gatekeeper: Check if this physical phone is already owned by someone else!
-      final deviceCheck = await _firestore
-          .collection('users')
-          .where('registeredDeviceId', isEqualTo: fingerprint)
-          .get(const GetOptions(source: Source.server));
-
-      if (deviceCheck.docs.isNotEmpty) {
-        final ownerId = deviceCheck.docs.first.id;
-        if (ownerId != studentId) {
-          throw Exception(
-            'SECURITY_VIOLATION: This physical phone is already permanently bound to Student ID: $ownerId. Proxy attendance is strictly prohibited.',
-          );
-        }
-      }
-
-      // If clear, claim the device in the cloud and locally
-      await userDocRef.set({
-        'registeredDeviceId': fingerprint,
-      }, SetOptions(merge: true));
-      await prefs.setString('bound_student_id', studentId);
-    }
-
-    if (!userDoc.exists) {
-      await claimDevice();
-      return;
-    }
-
-    final userData = userDoc.data()!;
-    final cloudDeviceId = userData['registeredDeviceId'];
-
-    if (cloudDeviceId == null || cloudDeviceId.toString().isEmpty) {
-      await claimDevice();
-    } else if (cloudDeviceId != fingerprint) {
-      throw Exception(
-        'SECURITY_VIOLATION: Identity mismatch. Your account is bound to a different physical device.',
-      );
-    } else {
-      // Success: Re-sync local storage in case they managed to clear app data but still passed the cloud check
-      await prefs.setString('bound_student_id', studentId);
-    }
   }
 
   Future<void> _joinEventWithOSPermission(
@@ -526,11 +266,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     DocumentSnapshot<Map<String, dynamic>>? existingAttendance;
 
     try {
-      existingAttendance = await attendanceRef.get(
-        GetOptions(
-          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
-        ),
-      );
+      existingAttendance = await attendanceRef.get();
     } catch (e) {
       existingAttendance = null;
     }
@@ -543,11 +279,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         eventData: data,
         now: DateTime.now(),
       );
-      final refreshedAttendance = await attendanceRef.get(
-        GetOptions(
-          source: _isOfflineMode ? Source.cache : Source.serverAndCache,
-        ),
-      );
+      final refreshedAttendance = await attendanceRef.get();
       final refreshedData = refreshedAttendance.data() ?? attendanceData;
       final existingRecord = AttendanceSessionRecord.fromFirestore(
         refreshedData,
@@ -577,15 +309,14 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
 
     try {
-      await _enforceDeviceBinding(widget.studentId);
+      await DeviceBinding.bind(widget.studentId);
       // Fetch current position to ensure the GPS sensor is active
       await Geolocator.getCurrentPosition();
     } catch (e) {
       if (!mounted) return;
 
-      final errorMessage = e.toString();
-      final displayMessage = errorMessage.contains('SECURITY_VIOLATION')
-          ? errorMessage.replaceAll('Exception: ', '')
+      final displayMessage = e is DeviceBindingException
+          ? e.message
           : 'Failed to verify location. Please ensure GPS is enabled.';
 
       ScaffoldMessenger.of(
@@ -627,20 +358,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   String _formatDate(Timestamp? timestamp) {
     if (timestamp == null) return 'Unknown Date';
     return DateFormat('EEEE, MMMM d, yyyy').format(timestamp.toDate());
-  }
-
-  String _formatDateTime(Timestamp? timestamp) {
-    if (timestamp == null) return 'Not recorded';
-    return DateFormat('MMM d, yyyy - hh:mm a').format(timestamp.toDate());
-  }
-
-  String _formatReturnCountFromRecord(Map<String, dynamic> data) {
-    final rawSessions = data['sessions'] as List<dynamic>?;
-    final sessionCount = rawSessions?.length ?? 0;
-    final returnCount = sessionCount <= 1 ? 0 : sessionCount - 1;
-    if (returnCount == 0) return 'No returns';
-    if (returnCount == 1) return '1 return';
-    return '$returnCount returns';
   }
 
   String _formatDuration(int seconds) {
@@ -1429,14 +1146,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              IconButton(
-                icon: Icon(
-                  _isOfflineMode ? Icons.cloud_off : Icons.cloud_done,
-                  color: _isOfflineMode ? Colors.orange.shade300 : Colors.white,
-                ),
-                onPressed: () => _toggleOfflineMode(!_isOfflineMode),
-                tooltip: _isOfflineMode ? 'Go Online' : 'Go Offline',
-              ),
               IconButton(
                 icon: const Icon(Icons.logout, color: Colors.white),
                 onPressed: _handleLogout,

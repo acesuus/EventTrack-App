@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'attendance_policy.dart';
 import 'geofencing_service.dart';
@@ -59,11 +59,22 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   String? _locationError;
   String _currentStatus = 'Loading...';
 
+  /// The attendance record as last saved; kept in memory so tracking works offline.
+  Map<String, dynamic> _record = {};
+  StreamSubscription<Position>? _positionSubscription;
+  Timer? _keepAliveTimer;
+  Timer? _eventEndTimer;
+  DateTime? _lastPositionAt;
+  bool _isProcessing = false;
+
+  /// Readings less precise than this are shown but never change attendance.
+  static const double _maxAccuracyMeters = 50;
+
   @override
   void initState() {
     super.initState();
     unawaited(_rememberJoinedEvent());
-    _checkAndLogLocation();
+    unawaited(_start());
   }
 
   Future<void> _rememberJoinedEvent() async {
@@ -82,6 +93,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
 
   @override
   void dispose() {
+    _positionSubscription?.cancel();
+    _keepAliveTimer?.cancel();
+    _eventEndTimer?.cancel();
     super.dispose();
   }
 
@@ -105,377 +119,359 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       widget.eventData['eventType']?.toString() ??
       AttendancePolicy.eventTypeContinuous;
 
+  bool get _isInOut => _eventType == AttendancePolicy.eventTypeInOut;
+
+  List<AttendanceHalf> get _halves => AttendancePolicy.inOutHalves(widget.eventData);
+
   LatLng? get _studentPoint => _currentPosition == null
       ? null
       : LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
 
+  /// Keeps location updates running while the phone is locked: a foreground
+  /// service notification on Android, background location mode on iOS.
   LocationSettings _buildLocationSettings() {
-    return const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      distanceFilter: 0,
-    );
+    if (!kIsWeb && Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+        intervalDuration: const Duration(seconds: 30),
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationTitle: 'EventTrack is verifying your attendance',
+          notificationText: 'Location is used only until this event ends.',
+          enableWakeLock: true,
+        ),
+      );
+    }
+    if (!kIsWeb && Platform.isIOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+        allowBackgroundLocationUpdates: true,
+        showBackgroundLocationIndicator: true,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    }
+    return const LocationSettings(accuracy: LocationAccuracy.high);
   }
 
-  Future<void> _checkAndLogLocation({bool checkOutRequested = false}) async {
+  Future<void> _start() async {
+    try {
+      final snap = await _attendanceRef.get();
+      _record = snap.data() ?? {};
+    } catch (e) {
+      // Offline with nothing cached: start from an empty record.
+      debugPrint('Attendance record unavailable offline: $e');
+    }
     if (!mounted) return;
-    setState(() {
-      _isCheckingLocation = true;
-      _locationError = null;
+    setState(() => _applyLocalState(_isInside));
+    if (await _finalizeIfEnded()) return;
+    if (!await _ensureLocationAccess()) return;
+
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: _buildLocationSettings(),
+    ).listen(
+      (pos) => unawaited(_handlePosition(pos)),
+      onError: (Object e) {
+        debugPrint('Location stream error: $e');
+        if (mounted) setState(() => _locationError = 'Unable to read current location');
+      },
+    );
+
+    // Stationary phones may stop reporting; ask for a fix so attendance keeps updating.
+    _keepAliveTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      final last = _lastPositionAt;
+      if (last == null || DateTime.now().difference(last).inSeconds >= 60) {
+        unawaited(_checkNow());
+      }
     });
 
+    final untilEnd = _eventEndTimestamp.toDate().difference(DateTime.now());
+    _eventEndTimer = Timer(untilEnd + const Duration(seconds: 5), () {
+      unawaited(_finalizeIfEnded());
+    });
+  }
+
+  Future<bool> _ensureLocationAccess() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _isCheckingLocation = false;
         _locationError = 'Turn on location services';
       });
-      return;
+      return false;
     }
 
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _isCheckingLocation = false;
         _locationError = 'Location permission required';
       });
-      return;
+      return false;
     }
+    return true;
+  }
 
+  /// One-off reading, used by the button and when the stream goes quiet.
+  Future<void> _checkNow({bool checkOutRequested = false}) async {
+    if (_attendanceFinalized) return;
+    if (!await _ensureLocationAccess()) return;
+    if (mounted && checkOutRequested) setState(() => _isCheckingLocation = true);
     try {
-      Position? pos;
-      try {
-        pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (e) {
-        pos = await Geolocator.getLastKnownPosition();
-      }
-
-      if (pos == null) {
-        if (!mounted) return;
-        setState(() {
-          _isCheckingLocation = false;
-          _locationError =
-              'Weak GPS signal. Please step near a window or go outside.';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Weak GPS signal. Please step near a window or go outside.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final distanceInMeters = Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        _eventPoint.latitude,
-        _eventPoint.longitude,
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
-      final currentlyInside = await GeofencingService.isStudentInsideEvent(
-        pos,
-        widget.eventData,
-        useMock: false,
-      );
-      if (!mounted) return;
-
-      if (pos.isMocked) {
-        if (!mounted) return;
-        setState(() {
-          _isInside = false;
-          _isCheckingLocation = false;
-          _currentPosition = pos;
-          _distanceToVenueMeters = distanceInMeters;
-          _currentStatus = 'Spoofing Detected';
-        });
-
-        if (!_hasShownSpoofingWarning) {
-          _hasShownSpoofingWarning = true;
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Invalid Location', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-              content: const Text(
-                'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\n\nPlease disable the spoofer and rejoin the event.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Exit Event'),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-      final isOffline = prefs.containsKey('cached_today_events');
-
-      if (isOffline) {
-        if (!currentlyInside) {
-          setState(() {
-            _currentPosition = pos;
-            _distanceToVenueMeters = distanceInMeters;
-            _isInside = false;
-            _isCheckingLocation = false;
-            _locationError = null;
-            _currentStatus = 'Outside Event Area';
-          });
-          return;
-        } else {
-          final queueStr = prefs.getString('offline_attendance_queue');
-          List<dynamic> queue = queueStr != null ? jsonDecode(queueStr) : [];
-
-          bool isDuplicate = queue.any(
-            (item) => item['eventId'] == widget.eventId,
-          );
-          if (isDuplicate) {
-            setState(() {
-              _currentPosition = pos;
-              _distanceToVenueMeters = distanceInMeters;
-              _isInside = true;
-              _isCheckingLocation = false;
-              _locationError = null;
-              _currentStatus = 'Inside Event Area';
-            });
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Attendance already recorded locally. Sync required.',
-                  ),
-                ),
-              );
-            }
-            return;
-          }
-
-          final int basePoints =
-              int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ??
-              10;
-
-          final newRecord = {
-            'eventId': widget.eventId,
-            'eventName': widget.eventData['title'] ?? 'Unknown Event',
-            'status': 'Present',
-            'pointsAwarded': basePoints,
-            'timestamp': DateTime.now().toIso8601String(),
-          };
-
-          queue.add(newRecord);
-          await prefs.setString('offline_attendance_queue', jsonEncode(queue));
-          if (!mounted) return;
-
-          setState(() {
-            _currentPosition = pos;
-            _distanceToVenueMeters = distanceInMeters;
-            _isInside = true;
-            _isCheckingLocation = false;
-            _locationError = null;
-            _currentStatus = 'Inside Event Area';
-            _attendanceStatus = 'Present';
-            _timeIn = Timestamp.now();
-            _attendanceFinalized = false;
-          });
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Attendance recorded locally. Sync required.'),
-              ),
-            );
-          }
-          return;
-        }
-      }
-
-      final now = Timestamp.now();
-      await _processAttendanceLogic(
-        currentlyInside,
-        now,
-        checkOutRequested: checkOutRequested,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _currentPosition = pos;
-        _distanceToVenueMeters = distanceInMeters;
-        _isInside = currentlyInside;
-        _isCheckingLocation = false;
-        _locationError = null;
-      });
+      await _handlePosition(pos, checkOutRequested: checkOutRequested);
     } catch (e) {
-      debugPrint('Error in location tracking: $e');
+      debugPrint('Location check failed: $e');
       if (!mounted) return;
       setState(() {
         _isCheckingLocation = false;
-        _locationError = 'Unable to read current location';
+        _locationError = 'Weak GPS signal. Please step near a window or go outside.';
       });
     }
   }
 
-  Future<void> _processAttendanceLogic(
-    bool currentlyInside,
-    Timestamp now, {
+  Future<void> _handlePosition(
+    Position pos, {
     bool checkOutRequested = false,
   }) async {
-    final docSnap = await _attendanceRef.get();
-    Map<String, dynamic> data = docSnap.exists ? docSnap.data()! : {};
+    _lastPositionAt = DateTime.now();
+    if (_attendanceFinalized || _isProcessing) return;
+    _isProcessing = true;
+    try {
+      await _processPosition(pos, checkOutRequested: checkOutRequested);
+    } finally {
+      _isProcessing = false;
+    }
+  }
 
-    String currentStatus = data['status'] as String? ?? 'Pending';
-    Timestamp? timeIn = data['timeIn'] as Timestamp?;
-    Timestamp? timeOut = data['timeOut'] as Timestamp?;
-    Timestamp? lastVerified = data['lastVerified'] as Timestamp?;
+  Future<void> _processPosition(
+    Position pos, {
+    required bool checkOutRequested,
+  }) async {
+    final distanceInMeters = Geolocator.distanceBetween(
+      pos.latitude,
+      pos.longitude,
+      _eventPoint.latitude,
+      _eventPoint.longitude,
+    );
 
-    if (timeOut != null) {
-      // Already finalized
-      _applyLocalState(data, currentlyInside);
+    if (pos.isMocked) {
+      if (!mounted) return;
+      setState(() {
+        _isInside = false;
+        _isCheckingLocation = false;
+        _currentPosition = pos;
+        _distanceToVenueMeters = distanceInMeters;
+        _currentStatus = 'Spoofing Detected';
+      });
+      _showSpoofingWarning();
       return;
     }
 
-    bool updated = false;
+    bool currentlyInside;
+    try {
+      currentlyInside = await GeofencingService.isStudentInsideEvent(
+        pos,
+        widget.eventData,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingLocation = false;
+        _locationError = e.toString().replaceAll('Exception: ', '').replaceAll('SECURITY_VIOLATION: ', '');
+      });
+      return;
+    }
+    if (!mounted) return;
 
-    if (_eventType == AttendancePolicy.eventTypeInOut) {
-      data = AttendancePolicy.verifyInOutAttendance(
-        existing: data,
+    setState(() {
+      _currentPosition = pos;
+      _distanceToVenueMeters = distanceInMeters;
+      _isInside = currentlyInside;
+      _isCheckingLocation = false;
+      _locationError = null;
+    });
+
+    if (pos.accuracy > _maxAccuracyMeters) {
+      if (checkOutRequested) {
+        _showMessage('GPS is not precise enough yet. Step outside or near a window and try again.');
+      }
+      return;
+    }
+
+    final now = Timestamp.now();
+    final Map<String, dynamic>? updated;
+    if (_isInOut) {
+      updated = AttendancePolicy.verifyInOutAttendance(
+        existing: _record,
         verifiedAt: now,
-        eventStart: _eventStartTimestamp.toDate(),
+        halves: _halves,
         isInside: currentlyInside,
         checkOutRequested: checkOutRequested,
-        lateCutoffMinutes: widget.eventData['lateCutoffMinutes'] ?? 15,
+        lateCutoffMinutes: AttendancePolicy.lateCutoffOf(widget.eventData),
+        checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
       );
-      updated = data['timeIn'] != timeIn || data['timeOut'] != timeOut;
-      if (checkOutRequested && timeIn != null && !currentlyInside && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Return to the venue to check out.')),
-        );
+      if (updated == null && checkOutRequested) {
+        _showMessage(_checkOutBlockedReason(currentlyInside, now.toDate()));
       }
     } else {
-      // Type 2: Continuous Stay
-      if (timeIn == null) {
-        if (currentlyInside) {
-          timeIn = now;
-          currentStatus = AttendancePolicy.determineInitialStatus(
-            checkInTime: now.toDate(),
-            eventStart: _eventStartTimestamp.toDate(),
-            lateCutoffMinutes: widget.eventData['lateCutoffMinutes'] ?? 15,
-          );
-          data['timeIn'] = timeIn;
-          data['status'] = currentStatus;
-          data['initialStatus'] = currentStatus;
-          data['lastVerified'] = now;
-          updated = true;
-        }
-      } else {
-        if (currentlyInside) {
-          data['lastVerified'] = now;
-          updated = true;
-        } else {
-          // Student is outside. Check grace period.
-          if (lastVerified != null) {
-            final minsGone = now
-                .toDate()
-                .difference(lastVerified.toDate())
-                .inMinutes;
-            if (minsGone > 20) {
-              currentStatus = 'Partial';
-              data['status'] = currentStatus;
-              updated = true;
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'You have been outside for over 20 mins. Status changed to Partial.',
-                    ),
-                    backgroundColor: StudentUi.muted,
-                  ),
-                );
-              }
-            } else {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Warning: You are outside the venue. Return within ${20 - minsGone} mins to avoid penalty.',
-                    ),
-                  ),
-                );
-              }
-            }
-          }
-        }
-      }
+      final opens = _eventStartTimestamp.toDate().subtract(
+        Duration(minutes: AttendancePolicy.checkInOpenOf(widget.eventData)),
+      );
+      final inWindow =
+          !now.toDate().isBefore(opens) &&
+          !now.toDate().isAfter(_eventEndTimestamp.toDate());
+      updated = inWindow
+          ? AttendancePolicy.verifyContinuousAttendance(
+              existing: _record,
+              verifiedAt: now,
+              eventStart: _eventStartTimestamp.toDate(),
+              isInside: currentlyInside,
+              lateCutoffMinutes: AttendancePolicy.lateCutoffOf(widget.eventData),
+            )
+          : null;
     }
 
-    if (updated) {
-      final int basePoints =
-          int.tryParse(widget.eventData['basePoints']?.toString() ?? '') ?? 10;
-      String finalStatus = data['status'] as String? ?? 'Present';
-      int pointsAwarded = 0;
-      if (finalStatus == 'Present') {
-        pointsAwarded = basePoints;
-      } else if (finalStatus == 'Late' || finalStatus == 'Partial') {
-        pointsAwarded = (basePoints / 2).round();
-      } else {
-        pointsAwarded = 0;
-      }
+    if (updated != null) _save(updated);
+    if (!mounted) return;
+    setState(() => _applyLocalState(currentlyInside));
+  }
 
-      data['studentId'] = widget.studentId;
-      data['eventId'] = widget.eventId;
-      data['eventTitle'] = _eventTitle;
-      data['eventType'] = _eventType;
-      data['eventName'] = widget.eventData['title'] ?? 'Unknown Event';
-      data['pointsAwarded'] = pointsAwarded;
-      await _attendanceRef.set(data, SetOptions(merge: true));
-      if (checkOutRequested && data['timeOut'] != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Checked out. Your attendance has been saved.'),
+  String _checkOutBlockedReason(bool inside, DateTime now) {
+    if (!inside) return 'Return to the venue to check out.';
+    final index = AttendancePolicy.halfIndexAt(
+      _halves,
+      now,
+      checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
+    );
+    if (index == null) return 'Check-out is not open right now.';
+    final opens = AttendancePolicy.checkOutOpensAt(_halves[index]);
+    return 'Check-out opens at ${DateFormat('h:mm a').format(opens)}.';
+  }
+
+  /// Saves without awaiting: offline, Firestore queues the write and syncs later.
+  void _save(Map<String, dynamic> data) {
+    final status = data['status']?.toString() ?? 'Present';
+    _record = {
+      ...data,
+      'studentId': widget.studentId,
+      'eventId': widget.eventId,
+      'eventTitle': _eventTitle,
+      'eventName': _eventTitle,
+      'eventType': _eventType,
+      'pointsAwarded': AttendancePolicy.pointsFor(
+        status,
+        AttendancePolicy.basePointsOf(widget.eventData),
+      ),
+    };
+    final wasFinal = data['timeOut'] != null;
+    _attendanceRef.set(_record, SetOptions(merge: true)).catchError((Object e) {
+      debugPrint('Attendance save failed: $e');
+      _showMessage("Couldn't save your attendance. Make sure you're logged in, then try again.");
+    });
+    if (wasFinal) {
+      _stopTracking();
+      _showMessage('Attendance saved as ${_displayAttendanceStatus(status)}.');
+    }
+  }
+
+  Future<bool> _finalizeIfEnded() async {
+    final done = AttendancePolicy.finalizeIfEnded(
+      _record,
+      widget.eventData,
+      DateTime.now(),
+    );
+    if (done == null) {
+      if (_record['timeOut'] != null) _stopTracking();
+      return _record['timeOut'] != null;
+    }
+    if (_record['timeIn'] == null) {
+      // Never checked in: nothing to save, the student is Absent.
+      _stopTracking();
+      if (mounted) setState(() => _locationError = 'This event has ended');
+      return true;
+    }
+    _save(done);
+    if (mounted) setState(() => _applyLocalState(_isInside));
+    return true;
+  }
+
+  void _stopTracking() {
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+    _keepAliveTimer?.cancel();
+    _eventEndTimer?.cancel();
+    if (mounted) setState(() => _isCheckingLocation = false);
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showSpoofingWarning() {
+    if (_hasShownSpoofingWarning || !mounted) return;
+    _hasShownSpoofingWarning = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Invalid Location', style: TextStyle(color: Colors.red)),
+          ],
+        ),
+        content: const Text(
+          'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\n\nPlease disable the spoofer and rejoin the event.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            child: const Text('Exit Event'),
           ),
-        );
-      }
-    }
-
-    _applyLocalState(data, currentlyInside);
+        ],
+      ),
+    );
   }
 
-  void _applyLocalState(Map<String, dynamic> data, bool currentlyInside) {
-    _attendanceStatus = data['status'] as String?;
-    _timeIn = data['timeIn'] as Timestamp?;
-    _timeOut = data['timeOut'] as Timestamp?;
+  void _applyLocalState(bool currentlyInside) {
+    _attendanceStatus = _record['status'] as String?;
+    _timeIn = _record['timeIn'] as Timestamp?;
+    _timeOut = _record['timeOut'] as Timestamp?;
     _attendanceFinalized = _timeOut != null;
-
-    if (_attendanceStatus == null) {
-      _currentStatus = 'Outside Event Area';
-    } else {
-      _currentStatus = currentlyInside
-          ? 'Inside Event Area'
-          : 'Outside Event Area';
-    }
+    if (_attendanceFinalized) _isCheckingLocation = false;
+    _currentStatus = currentlyInside ? 'Inside Event Area' : 'Outside Event Area';
   }
+
+  /// The In/Out half the student can act on right now, or null between halves.
+  int? get _currentHalfIndex => AttendancePolicy.halfIndexAt(
+    _halves,
+    DateTime.now(),
+    checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
+  );
+
+  String _halfName(int index) =>
+      _halves.length == 1 ? '' : (index == 0 ? ' (morning)' : ' (afternoon)');
+
+  /// Seconds away from the venue so far (Continuous Stay only).
+  int get _outsideSecondsNow =>
+      AttendanceSessionRecord.fromFirestore(_record).displayOutsideSecondsAt(DateTime.now());
 
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '--:--';
@@ -534,18 +530,29 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     if (_locationError != null) {
       return 'Location is needed to validate attendance';
     }
-    if (_attendanceStatus == null) {
-      return 'Go to the event venue, then verify your location to check in.';
-    }
-
-    if (_eventType == AttendancePolicy.eventTypeInOut) {
-      return 'You are checked in. Check out at the venue when you are ready to leave.';
-    } else {
-      if (!_isInside) {
-        return 'You are outside the event area. Return within the grace period to avoid Partial status.';
+    if (_isInOut) {
+      final index = _currentHalfIndex;
+      if (index == null) {
+        final next = _halves.where((h) => h.start.isAfter(DateTime.now()));
+        return next.isEmpty
+            ? 'Check-in is closed for this event.'
+            : 'Next check-in opens at ${DateFormat('h:mm a').format(next.first.start.subtract(Duration(minutes: AttendancePolicy.checkInOpenOf(widget.eventData))))}.';
       }
-      return 'Your attendance is active. Verify your location regularly while at the venue.';
+      final half = AttendancePolicy.halvesOf(_record, _halves.length)[index];
+      if (half['timeIn'] == null) {
+        return 'Go to the venue. You are checked in${_halfName(index)} automatically when your location is verified.';
+      }
+      return 'Checked in${_halfName(index)}. Check out at the venue from ${DateFormat('h:mm a').format(AttendancePolicy.checkOutOpensAt(_halves[index]))}. Both halves are needed to avoid Partial.';
     }
+    if (_attendanceStatus == null) {
+      return 'Go to the venue. You are checked in automatically when your location is verified.';
+    }
+    final awayMinutes = _outsideSecondsNow ~/ 60;
+    final limit = AttendancePolicy.allowedOutsideSeconds ~/ 60;
+    final away = awayMinutes > limit
+        ? 'You have been away $awayMinutes min, more than the $limit min allowed, so this will be saved as Partial.'
+        : 'Time away so far: $awayMinutes of $limit min allowed.';
+    return 'Keep this screen open until the event ends. You can lock your phone. $away';
   }
 
   Color _attendanceColor(String status) {
@@ -729,12 +736,19 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     );
   }
 
+  /// True when the button should check out of the current In/Out half.
+  bool get _canRequestCheckOut {
+    if (!_isInOut) return false;
+    final index = _currentHalfIndex;
+    if (index == null) return false;
+    final half = AttendancePolicy.halvesOf(_record, _halves.length)[index];
+    return half['timeIn'] != null && half['timeOut'] == null;
+  }
+
   String get _verificationLabel {
     if (_isCheckingLocation) return 'Checking location…';
     if (_attendanceFinalized) return 'Attendance saved';
-    if (_eventType == AttendancePolicy.eventTypeInOut && _timeIn != null) {
-      return 'Check out';
-    }
+    if (_canRequestCheckOut) return 'Check out${_halfName(_currentHalfIndex!)}';
     return _timeIn == null ? 'Verify location & check in' : 'Verify location';
   }
 
@@ -872,10 +886,8 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                   FilledButton.icon(
                     onPressed: _isCheckingLocation || _attendanceFinalized
                         ? null
-                        : () => _checkAndLogLocation(
-                            checkOutRequested:
-                                _eventType == AttendancePolicy.eventTypeInOut &&
-                                _timeIn != null,
+                        : () => _checkNow(
+                            checkOutRequested: _canRequestCheckOut,
                           ),
                     icon: Icon(
                       _attendanceFinalized ? Icons.check : Icons.my_location,
@@ -975,6 +987,15 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
               StudentSurface(
                 child: Column(
                   children: [
+                    if (_isInOut && _halves.length == 2)
+                      for (final (i, half) in AttendancePolicy.halvesOf(_record, 2).indexed) ...[
+                        _buildDataRow(
+                          i == 0 ? 'Morning' : 'Afternoon',
+                          '${_formatTime(half['timeIn'] as Timestamp?)} in · ${_formatTime(half['timeOut'] as Timestamp?)} out',
+                          _darkText,
+                        ),
+                        const Divider(height: 20, color: StudentUi.line),
+                      ],
                     _buildDataRow(
                       'Checked in',
                       _timeIn != null
