@@ -44,7 +44,8 @@ class SchoolYearService {
     // Claim the rollover atomically so it only runs once even with multiple admins.
     final int yearsElapsed = await _firestore.runTransaction<int>((tx) async {
       final snap = await tx.get(_settingsRef);
-      final lastStart = (snap.data()?['lastPromotedSchoolYear'] as num?)?.toInt();
+      final lastStart = (snap.data()?['lastPromotedSchoolYear'] as num?)
+          ?.toInt();
 
       if (lastStart == null) {
         // First run: record the current school year without promoting existing data.
@@ -68,7 +69,9 @@ class SchoolYearService {
       return SchoolYearRolloverResult(rolledOver: false, schoolYear: label);
     }
 
-    final counts = await _promoteStudents(yearsElapsed);
+    // Promote both the imported list and students' own profiles.
+    await _promoteStudents('students', yearsElapsed);
+    final counts = await _promoteStudents('users', yearsElapsed);
     return SchoolYearRolloverResult(
       rolledOver: true,
       schoolYear: label,
@@ -78,9 +81,12 @@ class SchoolYearService {
   }
 
   /// Increments the year level in each student's `yearBlock` (e.g. "1-A" -> "2-A").
-  /// Students who go past [maxYearLevel] have graduated and their profile is removed.
-  static Future<({int promoted, int graduated})> _promoteStudents(int yearsElapsed) async {
-    final students = await _firestore.collection('users').get();
+  /// Students who go past [maxYearLevel] have graduated and are removed.
+  static Future<({int promoted, int graduated})> _promoteStudents(
+    String collection,
+    int yearsElapsed,
+  ) async {
+    final students = await _firestore.collection(collection).get();
     WriteBatch batch = _firestore.batch();
     int batchCount = 0;
     int promoted = 0;
@@ -97,7 +103,9 @@ class SchoolYearService {
         batch.delete(doc.reference);
         graduated++;
       } else {
-        batch.update(doc.reference, {'yearBlock': '$newLevel${match.group(2)}'});
+        batch.update(doc.reference, {
+          'yearBlock': '$newLevel${match.group(2)}',
+        });
         promoted++;
       }
       batchCount++;

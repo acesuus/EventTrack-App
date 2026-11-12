@@ -38,6 +38,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   // Geofence Data
   LatLng? _selectedLocation;
   PSUCampus? _selectedCampusLocation;
+  // When editing, the saved boundary is reused only if the venue was not moved.
+  bool _locationChanged = false;
   final MapController _mapController = MapController();
 
   // Date & Time Data
@@ -82,6 +84,18 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         _endTime = TimeOfDay.fromDateTime(end);
       }
       _eventType = data['eventType'] ?? AttendancePolicy.eventTypeContinuous;
+      _pointsController.text = (data['basePoints'] ?? 10).toString();
+
+      TimeOfDay? timeOf(String key) => data[key] is Timestamp
+          ? TimeOfDay.fromDateTime((data[key] as Timestamp).toDate())
+          : null;
+      if (data['morningStartTime'] is Timestamp) {
+        _singleEventDate = (data['morningStartTime'] as Timestamp).toDate();
+      }
+      _morningIn = timeOf('morningStartTime');
+      _morningOut = timeOf('morningEndTime');
+      _afternoonIn = timeOf('afternoonStartTime');
+      _afternoonOut = timeOf('afternoonEndTime');
     } else if (!_isEditing && widget.preSelectedDate != null) {
       _startDate = widget.preSelectedDate;
       _endDate = widget.preSelectedDate;
@@ -209,6 +223,14 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       }
     }
 
+    final basePoints = int.tryParse(_pointsController.text.trim());
+    if (basePoints == null || basePoints < 1 || basePoints > 1000) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Points must be a whole number from 1 to 1000.')),
+      );
+      return;
+    }
+
     // 1. Prepare the container for our Firestore-ready points
     List<Map<String, double>> finalPolygonPoints = [];
 
@@ -217,7 +239,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       finalPolygonPoints = _selectedCampusLocation!.polygonPoints
           .map((p) => {'lat': p.latitude, 'lng': p.longitude})
           .toList();
-    } else if (widget.existingData != null && widget.existingData!['polygonPoints'] != null) {
+    } else if (!_locationChanged &&
+        widget.existingData != null &&
+        widget.existingData!['polygonPoints'] != null) {
       // PRIORITY 2: Fallback to existing data (Useful when editing an event)
       final rawPoints = widget.existingData!['polygonPoints'] as List<dynamic>;
       finalPolygonPoints = rawPoints.map((point) {
@@ -261,7 +285,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       'polygonPoints': finalPolygonPoints,
       'lateCutoffMinutes': _lateCutoff,
       'eventType': _eventType,
-      'basePoints': int.tryParse(_pointsController.text.trim()) ?? 10,
+      'basePoints': basePoints,
     };
 
     if (_eventType == AttendancePolicy.eventTypeInOut || _eventType == 'type1_in_out') {
@@ -509,6 +533,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 if (newValue != null) {
                   setState(() {
                     _selectedCampusLocation = newValue;
+                    _locationChanged = true;
                     _venueName = newValue.name; // Automatically set the Venue Name
                     _selectedLocation = LatLng(newValue.latitude, newValue.longitude);
                   });
@@ -540,6 +565,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 onTap: (tapPosition, point) {
                   setState(() {
                     _selectedLocation = point;
+                    _locationChanged = true;
                   });
                 },
               ),  

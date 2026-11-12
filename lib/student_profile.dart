@@ -1,7 +1,8 @@
 /// Shared rules for student IDs and profile fields.
 library;
 
-const studentPrograms = ['BSCS', 'BSIT'];
+const studentPrograms = ['BSCS'];
+const defaultProgram = 'BSCS';
 
 final _psuEmail = RegExp(r'^(\d{4})(\d)(\d{4})@psu\.palawan\.edu\.ph$');
 final _yearBlock = RegExp(r'^[1-4]-[A-Z0-9]{1,3}$');
@@ -23,3 +24,18 @@ String? normalizeYearBlock(String raw) {
   final value = raw.trim().toUpperCase();
   return _yearBlock.hasMatch(value) ? value : null;
 }
+
+/// Combines the admin's imported list with students' own profiles, by student ID.
+/// A student's own non-empty values win over the imported ones.
+Map<String, Map<String, dynamic>> mergeStudentRecords(
+  Map<String, Map<String, dynamic>> imported,
+  Map<String, Map<String, dynamic>> profiles,
+) => {
+  for (final id in {...imported.keys, ...profiles.keys})
+    id: {
+      ...?imported[id],
+      for (final entry in (profiles[id] ?? const {}).entries)
+        if (entry.value != null && entry.value.toString().trim().isNotEmpty)
+          entry.key: entry.value,
+    },
+};

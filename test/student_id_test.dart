@@ -21,4 +21,28 @@ void main() {
     expect(normalizeYearBlock('5-A'), isNull);
     expect(normalizeYearBlock('1A'), isNull);
   });
+
+  test('student profiles override the imported list, which is optional', () {
+    final merged = mergeStudentRecords(
+      {
+        '2023-1-2345': {
+          'name': 'Juan Cruz',
+          'program': 'BSCS',
+          'yearBlock': '1-A',
+        },
+        '2023-1-0001': {'name': 'Only Imported'},
+      },
+      {
+        '2023-1-2345': {'name': 'Juan D. Cruz', 'yearBlock': ''},
+        '2023-9-9999': {'name': 'Self Registered'},
+      },
+    );
+    expect(merged['2023-1-2345'], {
+      'name': 'Juan D. Cruz',
+      'program': 'BSCS',
+      'yearBlock': '1-A',
+    });
+    expect(merged['2023-1-0001']!['name'], 'Only Imported');
+    expect(merged['2023-9-9999']!['name'], 'Self Registered');
+  });
 }

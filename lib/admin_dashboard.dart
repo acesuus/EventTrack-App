@@ -60,7 +60,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Delete Event?'),
-            content: const Text('Are you sure you want to delete this event?'),
+            content: const Text(
+              'This deletes the event and all of its attendance records and points. This can\'t be undone.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -79,8 +81,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         false;
 
     if (confirm && mounted) {
-      await FirebaseFirestore.instance.collection('events').doc(docId).delete();
-      debugPrint('Live mode: Event $docId deleted');
+      final firestore = FirebaseFirestore.instance;
+      try {
+        // Remove its attendance too, so it leaves students' history and points.
+        final attendance = await firestore
+            .collection('attendance')
+            .where('eventId', isEqualTo: docId)
+            .get();
+        var batch = firestore.batch();
+        var count = 0;
+        for (final doc in attendance.docs) {
+          batch.delete(doc.reference);
+          if (++count == 450) {
+            await batch.commit();
+            batch = firestore.batch();
+            count = 0;
+          }
+        }
+        batch.delete(firestore.collection('events').doc(docId));
+        await batch.commit();
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Event deleted.')));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Couldn't delete the event. Check your connection.",
+              ),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -111,8 +146,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         false;
 
     if (confirm && mounted) {
-      await FirebaseFirestore.instance.collection('events').doc(docId).update({
-        'endTime': Timestamp.fromDate(DateTime.now()),
+      final ref = FirebaseFirestore.instance.collection('events').doc(docId);
+      final data = (await ref.get()).data() ?? {};
+      final now = Timestamp.now();
+      // Time In/Out events also end their halves now, so check-out closes too.
+      await ref.update({
+        'endTime': now,
+        for (final key in [
+          'morningEndTime',
+          'afternoonStartTime',
+          'afternoonEndTime',
+        ])
+          if (data[key] is Timestamp &&
+              (data[key] as Timestamp).compareTo(now) > 0)
+            key: now,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

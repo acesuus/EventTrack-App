@@ -157,6 +157,17 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
 
     // The student ID comes from the email digits, in 0000-0-0000 format.
     final studentId = studentIdFromEmail(_email)!;
+    // Optional: the admin's imported list may already have this student's details.
+    var roster = <String, dynamic>{};
+    try {
+      roster =
+          (await _firestore.collection('students').doc(studentId).get())
+              .data() ??
+          {};
+    } on FirebaseException catch (e) {
+      debugPrint('Student list lookup skipped: ${e.code}');
+    }
+
     try {
       await DeviceBinding.bind(studentId);
     } on DeviceBindingException catch (e) {
@@ -171,7 +182,27 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         {};
     final hasConsented = userData['hasConsented'] == true;
     final savedName = userData['name']?.toString().trim() ?? '';
-    final name = savedName.isNotEmpty ? savedName : 'Student';
+    final rosterName = roster['name']?.toString().trim() ?? '';
+    final name = savedName.isNotEmpty
+        ? savedName
+        : (rosterName.isNotEmpty ? rosterName : 'Student');
+    // Fill empty profile fields from the imported list, never overwriting the student's own.
+    final fill = <String, dynamic>{
+      for (final key in ['name', 'program', 'yearBlock'])
+        if ((userData[key]?.toString().trim() ?? '').isEmpty &&
+            (roster[key]?.toString().trim() ?? '').isNotEmpty)
+          key: roster[key],
+    };
+    if (fill.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(studentId)
+            .set(fill, SetOptions(merge: true));
+      } on FirebaseException catch (e) {
+        debugPrint('Profile prefill skipped: ${e.code}');
+      }
+    }
 
     await _saveLoginSession(studentId, name, hasConsented);
     if (!mounted) return;

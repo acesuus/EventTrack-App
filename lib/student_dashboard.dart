@@ -646,8 +646,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
             children: [
               _buildHomeHeader(),
               const SizedBox(height: 20),
-              _buildProfileCard(),
-              const SizedBox(height: 20),
               _buildPointsCard(),
               const SizedBox(height: 20),
               _buildEventsSection(),
@@ -658,102 +656,6 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildProfileCard() {
-    final program = _profile['program']?.toString() ?? '';
-    final yearBlock = _profile['yearBlock']?.toString() ?? '';
-    final incomplete = program.isEmpty || yearBlock.isEmpty;
-    Widget row(IconData icon, String label, String value) => Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: StudentUi.muted),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 92,
-            child: Text(
-              label,
-              style: const TextStyle(color: StudentUi.muted, fontSize: 13),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: _darkText,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: StudentUi.line),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'My Profile',
-                    style: TextStyle(
-                      color: _darkText,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _showEditProfileDialog,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Edit'),
-                  style: TextButton.styleFrom(foregroundColor: _primaryGreen),
-                ),
-              ],
-            ),
-            row(Icons.person_outline, 'Name', _displayName),
-            row(Icons.badge_outlined, 'Student ID', widget.studentId),
-            row(Icons.mail_outline, 'Email', _schoolEmail),
-            row(
-              Icons.school_outlined,
-              'Program',
-              program.isEmpty ? 'Not set' : program,
-            ),
-            row(
-              Icons.groups_outlined,
-              'Year & block',
-              yearBlock.isEmpty ? 'Not set' : yearBlock,
-            ),
-            if (incomplete) ...[
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _showEditProfileDialog,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _primaryGreen,
-                    minimumSize: const Size.fromHeight(48),
-                  ),
-                  child: const Text('Complete your profile'),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 

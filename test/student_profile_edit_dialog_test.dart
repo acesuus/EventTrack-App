@@ -18,7 +18,7 @@ Widget host(
             builder: (_) => StudentProfileEditDialog(
               name: 'Kert',
               email: 'kert@psu.palawan.edu.ph',
-              program: 'BSIT',
+              program: 'BSCS',
               yearBlock: '3-A',
               studentId: '202380358',
               onSave: save,
@@ -129,7 +129,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(result, isTrue);
       expect(savedName, 'Kert Dela Cruz');
-      expect(savedProgram, 'BSIT');
+      expect(savedProgram, 'BSCS');
       expect(savedYearBlock, '2-B');
       expect(calls, 1);
       expect(find.byType(StudentProfileEditDialog), findsNothing);

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+
+import 'student_profile.dart';
 import 'manage_events_screen.dart';
 import 'admin_settings_screen.dart';
 
@@ -64,12 +66,13 @@ class _AttendanceMonitoringScreenState
 
   Future<void> _fetchRoster() async {
     try {
-      // Every student who has logged in has a profile in `users`.
-      final snapshot = await _firestore.collection('users').get();
-      final Map<String, dynamic> tempRoster = {};
-      for (var doc in snapshot.docs) {
-        tempRoster[doc.id] = doc.data();
-      }
+      // Imported student list plus everyone who has logged in.
+      final imported = await _firestore.collection('students').get();
+      final profiles = await _firestore.collection('users').get();
+      final Map<String, dynamic> tempRoster = mergeStudentRecords(
+        {for (final doc in imported.docs) doc.id: doc.data()},
+        {for (final doc in profiles.docs) doc.id: doc.data()},
+      );
       if (mounted) {
         setState(() {
           rosterCache = tempRoster;
@@ -229,14 +232,23 @@ class _AttendanceMonitoringScreenState
               }
 
               var events = snapshot.data!.docs;
+              final selected = events
+                  .where((doc) => doc.id == _selectedEventId)
+                  .firstOrNull;
+              if (selected != null) {
+                // Keep the header in step with admin edits.
+                _selectedEventData = selected.data() as Map<String, dynamic>;
+              }
 
-              // Auto-select first event if none is selected
-              if (_selectedEventId == null && events.isNotEmpty) {
+              // Select the first event when none is selected or the selected one was deleted.
+              if (selected == null &&
+                  (_selectedEventId != null || events.isNotEmpty)) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
                   setState(() {
-                    _selectedEventId = events.first.id;
+                    _selectedEventId = events.firstOrNull?.id;
                     _selectedEventData =
-                        events.first.data() as Map<String, dynamic>;
+                        events.firstOrNull?.data() as Map<String, dynamic>?;
                   });
                 });
               }
@@ -255,7 +267,7 @@ class _AttendanceMonitoringScreenState
                       Icons.keyboard_arrow_down,
                       color: Colors.white,
                     ),
-                    value: _selectedEventId,
+                    value: selected?.id,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,

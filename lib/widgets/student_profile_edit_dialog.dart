@@ -33,7 +33,7 @@ class _StudentProfileEditDialogState extends State<StudentProfileEditDialog> {
   late final _yearBlock = TextEditingController(text: widget.yearBlock);
   late String? _program = studentPrograms.contains(widget.program)
       ? widget.program
-      : null;
+      : defaultProgram;
   bool _saving = false;
   String? _error;
 

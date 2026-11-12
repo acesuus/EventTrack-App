@@ -13,7 +13,7 @@ const project = 'event-track-46f63';
   const api = new Client({urlPrefix: 'https://firebaserules.googleapis.com', apiVersion: 'v1'});
   const tests = [];
   for (const auth of [null, {uid: 'ordinary', token: {}}, {uid: 'ordinary', token: {admin: false}}, {uid: 'admin', token: {admin: true}}]) {
-    for (const document of ['settings/schoolYear', 'events/demo']) {
+    for (const document of ['students/demo', 'settings/schoolYear', 'events/demo']) {
       for (const method of ['get', 'list', 'create', 'update', 'delete']) {
         const allowed = (document.startsWith('events/') && ['get', 'list'].includes(method)) || auth?.token.admin === true;
         tests.push({expectation: allowed ? 'ALLOW' : 'DENY',

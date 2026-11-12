@@ -1,5 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:csv/csv.dart' as csv_pkg;
+import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 
 import 'attendance_monitoring_screen.dart';
@@ -22,6 +26,200 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   final Color _darkText = const Color(0xFF0C2D48);
 
   // Toggle States
+
+  /// Shows the required CSV column format before letting the admin pick a file.
+  Future<void> _showImportInstructions() async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AppDataDialog(
+        title: 'Import Student List',
+        icon: Icons.upload_file_outlined,
+        subtitle: 'Prepare your CSV file before importing student records.',
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Your CSV file must have these columns in this exact order:',
+              ),
+              const SizedBox(height: 12),
+              Table(
+                border: TableBorder.all(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                columnWidths: const {
+                  0: IntrinsicColumnWidth(),
+                  1: FlexColumnWidth(),
+                },
+                children: [
+                  _instructionRow('Col', 'Field (Example)', isHeader: true),
+                  _instructionRow('A', 'Student ID (0000-0-0000)'),
+                  _instructionRow('B', 'Full Name (Juan D. Cruz)'),
+                  _instructionRow('C', 'Program (BSCS)'),
+                  _instructionRow('D', 'Year & Block (1-A)'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '• The first row is treated as a header and will be skipped.\n'
+                '• Student ID may be written with or without dashes.\n'
+                '• Year & Block must start with the year level (1-4), e.g. 3-B.\n'
+                '• The list is optional: any student can still log in with their PSU email.\n'
+                '• Rows with an invalid Student ID are skipped.\n'
+                '• Existing students with the same ID will be updated.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade700,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryGreen,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Choose CSV File'),
+          ),
+        ],
+      ),
+    );
+
+    if (proceed == true) {
+      await _importStudentCSV();
+    }
+  }
+
+  TableRow _instructionRow(String col, String field, {bool isHeader = false}) {
+    final style = TextStyle(
+      fontSize: 13,
+      fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
+      color: _darkText,
+    );
+    return TableRow(
+      decoration: isHeader
+          ? BoxDecoration(color: _primaryGreen.withValues(alpha: 0.08))
+          : null,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(col, style: style),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(field, style: style),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _importStudentCSV() async {
+    fp.FilePickerResult? result = await fp.FilePicker.platform.pickFiles(
+      type: fp.FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result != null && result.files.single.path != null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Importing students...')));
+
+      try {
+        final File file = File(result.files.single.path!);
+        final String rawCsvString = await file.readAsString();
+        final String safeCsvString = rawCsvString.replaceAll('\r\n', '\n');
+        final List<List<dynamic>> csvTable = const csv_pkg.CsvToListConverter(
+          eol: '\n',
+        ).convert(safeCsvString);
+
+        if (csvTable.length <= 1) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('CSV is empty or only contains headers.'),
+            ),
+          );
+          return;
+        }
+
+        final firestore = FirebaseFirestore.instance;
+        WriteBatch batch = firestore.batch();
+        int batchCount = 0;
+        int totalImported = 0;
+        int skipped = 0;
+
+        for (int i = 1; i < csvTable.length; i++) {
+          final row = csvTable[i];
+          if (row.isEmpty || row[0].toString().trim().isEmpty) continue;
+
+          final finalId = normalizeStudentId(row[0].toString());
+          if (finalId == null) {
+            skipped++;
+            continue;
+          }
+          final program = row.length > 2
+              ? row[2].toString().trim().toUpperCase()
+              : '';
+          final yearBlock = row.length > 3
+              ? normalizeYearBlock(row[3].toString())
+              : null;
+
+          final docRef = firestore.collection('students').doc(finalId);
+          final data = {
+            'studentId': finalId,
+            'name': row.length > 1 ? row[1].toString().trim() : '',
+            'program': studentPrograms.contains(program)
+                ? program
+                : defaultProgram,
+            'yearBlock': yearBlock ?? '',
+          };
+
+          batch.set(docRef, data, SetOptions(merge: true));
+          batchCount++;
+          totalImported++;
+
+          if (batchCount == 499) {
+            await batch.commit();
+            batch = firestore.batch();
+            batchCount = 0;
+          }
+        }
+
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                skipped == 0
+                    ? 'Imported $totalImported students.'
+                    : 'Imported $totalImported students. Skipped $skipped rows with an invalid Student ID.',
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error importing CSV: $e')));
+        }
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -140,6 +338,134 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     );
   }
 
+  Future<void> _showAddStudentDialog() async {
+    final TextEditingController firstNameCtrl = TextEditingController();
+    final TextEditingController miCtrl = TextEditingController();
+    final TextEditingController lastNameCtrl = TextEditingController();
+    final TextEditingController idCtrl = TextEditingController();
+    String program = defaultProgram;
+    String yearBlock = '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AppDataDialog(
+              title: 'Add Student Manually',
+              icon: Icons.person_add_alt_1_outlined,
+              subtitle: 'Optional. Students can also sign up on their own.',
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 16,
+                  children: [
+                    TextFormField(
+                      controller: firstNameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'First Name',
+                      ),
+                    ),
+                    TextFormField(
+                      controller: miCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Middle Initial (Optional)',
+                      ),
+                    ),
+                    TextFormField(
+                      controller: lastNameCtrl,
+                      decoration: const InputDecoration(labelText: 'Last Name'),
+                    ),
+                    TextFormField(
+                      controller: idCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Student ID (0000-0-0000)',
+                      ),
+                    ),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: program,
+                      decoration: const InputDecoration(labelText: 'Program'),
+                      items: [
+                        for (final p in studentPrograms)
+                          DropdownMenuItem(value: p, child: Text(p)),
+                      ],
+                      onChanged: (val) => setState(() => program = val!),
+                    ),
+                    TextFormField(
+                      decoration: const InputDecoration(
+                        labelText: 'Year & Block (e.g., 1-A)',
+                      ),
+                      onChanged: (val) => yearBlock = val,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final finalId = normalizeStudentId(idCtrl.text);
+                    final block = normalizeYearBlock(yearBlock);
+                    if (finalId == null ||
+                        firstNameCtrl.text.trim().isEmpty ||
+                        lastNameCtrl.text.trim().isEmpty ||
+                        block == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Enter a first and last name, a 9-digit Student ID, and a year & block like 1-A.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    String fullName = [
+                      firstNameCtrl.text.trim(),
+                      miCtrl.text.trim(),
+                      lastNameCtrl.text.trim(),
+                    ].where((s) => s.isNotEmpty).join(' ');
+
+                    try {
+                      await FirebaseFirestore.instance
+                          .collection('students')
+                          .doc(finalId)
+                          .set({
+                            'studentId': finalId,
+                            'name': fullName,
+                            'program': program,
+                            'yearBlock': block,
+                          }, SetOptions(merge: true));
+                      if (!context.mounted) return;
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Student added successfully.'),
+                        ),
+                      );
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _showEditStudentDialog() async {
     final TextEditingController idCtrl = TextEditingController();
 
@@ -181,23 +507,30 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                   return;
                 }
 
-                final doc = await FirebaseFirestore.instance
-                    .collection('users')
+                // Students who logged in have a profile; others may only be on the imported list.
+                final firestore = FirebaseFirestore.instance;
+                var collection = 'users';
+                var doc = await firestore
+                    .collection(collection)
                     .doc(finalId)
                     .get();
+                if (!doc.exists) {
+                  collection = 'students';
+                  doc = await firestore
+                      .collection(collection)
+                      .doc(finalId)
+                      .get();
+                }
                 if (!context.mounted) return;
 
                 if (doc.exists) {
                   Navigator.pop(context); // Close the fetch dialog
-                  _showUpdateStudentForm(
-                    finalId,
-                    doc.data() as Map<String, dynamic>,
-                  );
+                  _showUpdateStudentForm(finalId, doc.data()!, collection);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                        'No student with this ID has logged in yet.',
+                        'No student with this ID. They may not have logged in yet.',
                       ),
                     ),
                   );
@@ -266,6 +599,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
   void _showUpdateStudentForm(
     String studentId,
     Map<String, dynamic> existingData,
+    String collection,
   ) {
     final TextEditingController nameCtrl = TextEditingController(
       text: existingData['name'] ?? '',
@@ -274,7 +608,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
     final TextEditingController yearBlockCtrl = TextEditingController(
       text: existingData['yearBlock'] ?? '',
     );
-    if (!studentPrograms.contains(program)) program = null;
+    if (!studentPrograms.contains(program)) program = defaultProgram;
 
     showDialog(
       context: context,
@@ -341,7 +675,7 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
 
                     try {
                       await FirebaseFirestore.instance
-                          .collection('users')
+                          .collection(collection)
                           .doc(studentId)
                           .update({
                             'name': nameCtrl.text.trim(),
@@ -404,6 +738,22 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
             bgColor: _primaryGreen.withValues(alpha: 0.1),
             borderColor: _primaryGreen.withValues(alpha: 0.3),
             onTap: () => ExportUtils.showExportDialog(context, _primaryGreen),
+          ),
+          const SizedBox(height: 12),
+          _buildActionButton(
+            label: 'Import Student List',
+            textColor: Colors.white,
+            bgColor: _primaryGreen,
+            borderColor: _primaryGreen,
+            onTap: _showImportInstructions,
+          ),
+          const SizedBox(height: 12),
+          _buildActionButton(
+            label: 'Add Student Manually',
+            textColor: _primaryGreen,
+            bgColor: _primaryGreen.withValues(alpha: 0.1),
+            borderColor: _primaryGreen.withValues(alpha: 0.3),
+            onTap: _showAddStudentDialog,
           ),
           const SizedBox(height: 12),
           _buildActionButton(

@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import 'attendance_policy.dart';
+import 'student_profile.dart';
 import 'widgets/export_events_dialog.dart';
 
 class ExportUtils {
@@ -64,12 +65,13 @@ class ExportUtils {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      // Every student who has logged in has a profile in `users`.
-      final studentsSnapshot = await firestore.collection('users').get();
-      Map<String, Map<String, dynamic>> studentsMap = {};
-      for (var doc in studentsSnapshot.docs) {
-        studentsMap[doc.id] = doc.data();
-      }
+      // Imported student list plus everyone who has logged in.
+      final imported = await firestore.collection('students').get();
+      final profiles = await firestore.collection('users').get();
+      final studentsMap = mergeStudentRecords(
+        {for (final doc in imported.docs) doc.id: doc.data()},
+        {for (final doc in profiles.docs) doc.id: doc.data()},
+      );
 
       List<List<dynamic>> csvData = [
         [
@@ -184,12 +186,13 @@ class ExportUtils {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      // Every student who has logged in has a profile in `users`.
-      final studentsSnapshot = await firestore.collection('users').get();
-      Map<String, Map<String, dynamic>> studentsMap = {};
-      for (var doc in studentsSnapshot.docs) {
-        studentsMap[doc.id] = doc.data();
-      }
+      // Imported student list plus everyone who has logged in.
+      final imported = await firestore.collection('students').get();
+      final profiles = await firestore.collection('users').get();
+      final studentsMap = mergeStudentRecords(
+        {for (final doc in imported.docs) doc.id: doc.data()},
+        {for (final doc in profiles.docs) doc.id: doc.data()},
+      );
 
       final pdf = pw.Document();
 

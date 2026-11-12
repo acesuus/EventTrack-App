@@ -36,10 +36,10 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   final Color _darkText = StudentUi.ink;
 
   double get _eventRadius =>
-      (widget.eventData['radius'] as num?)?.toDouble() ?? 50.0;
+      (_event['radius'] as num?)?.toDouble() ?? 50.0;
 
   List<LatLng> get _eventPolygon {
-    final rawPoints = widget.eventData['polygonPoints'] as List<dynamic>?;
+    final rawPoints = _event['polygonPoints'] as List<dynamic>?;
     if (rawPoints == null) return [];
     return rawPoints.map((point) {
       final p = Map<String, dynamic>.from(point as Map);
@@ -62,6 +62,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   /// The attendance record as last saved; kept in memory so tracking works offline.
   Map<String, dynamic> _record = {};
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _eventSubscription;
+  bool _eventDeleted = false;
+
+  /// Latest event details; the admin may edit or end the event while this screen is open.
+  late Map<String, dynamic> _event = widget.eventData;
   Timer? _keepAliveTimer;
   Timer? _eventEndTimer;
   DateTime? _lastPositionAt;
@@ -73,11 +78,53 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_rememberJoinedEvent());
+    // Close this screen if the admin deletes the event while it is open.
+    _eventSubscription = _firestore
+        .collection('events')
+        .doc(widget.eventId)
+        .snapshots()
+        .listen((snap) {
+          if (snap.exists) {
+            unawaited(_rememberJoinedEvent());
+            _onEventChanged(snap.data()!);
+          } else if (!snap.metadata.isFromCache) {
+            _onEventDeleted();
+          }
+        }, onError: (Object e) => debugPrint('Event watch failed: $e'));
     unawaited(_start());
   }
 
+  void _onEventChanged(Map<String, dynamic> data) {
+    final endChanged = data['endTime'] != _event['endTime'];
+    if (!mounted) return;
+    setState(() => _event = data);
+    if (endChanged && _positionSubscription != null) {
+      _scheduleEndTimer();
+      unawaited(_finalizeIfEnded());
+    }
+  }
+
+  void _scheduleEndTimer() {
+    _eventEndTimer?.cancel();
+    final untilEnd = _eventEndTimestamp.toDate().difference(DateTime.now());
+    _eventEndTimer = Timer(untilEnd + const Duration(seconds: 5), () {
+      unawaited(_finalizeIfEnded());
+    });
+  }
+
+  void _onEventDeleted() {
+    if (_eventDeleted || !mounted) return;
+    _eventDeleted = true;
+    _stopTracking();
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('This event was deleted by the admin.')),
+    );
+  }
+
   Future<void> _rememberJoinedEvent() async {
+    if (_eventDeleted) return;
     try {
       await JoinedEventsStore.instance.join(widget.studentId, widget.eventId);
     } catch (error) {
@@ -93,6 +140,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
 
   @override
   void dispose() {
+    _eventSubscription?.cancel();
     _positionSubscription?.cancel();
     _keepAliveTimer?.cancel();
     _eventEndTimer?.cancel();
@@ -104,24 +152,24 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       .doc('${widget.studentId}_${widget.eventId}');
 
   LatLng get _eventPoint => LatLng(
-    (widget.eventData['lat'] as num).toDouble(),
-    (widget.eventData['lng'] as num).toDouble(),
+    (_event['lat'] as num).toDouble(),
+    (_event['lng'] as num).toDouble(),
   );
 
   Timestamp get _eventStartTimestamp =>
-      widget.eventData['startTime'] as Timestamp;
+      _event['startTime'] as Timestamp;
 
-  Timestamp get _eventEndTimestamp => widget.eventData['endTime'] as Timestamp;
+  Timestamp get _eventEndTimestamp => _event['endTime'] as Timestamp;
 
-  String get _eventTitle => widget.eventData['title']?.toString() ?? 'Event';
+  String get _eventTitle => _event['title']?.toString() ?? 'Event';
 
   String get _eventType =>
-      widget.eventData['eventType']?.toString() ??
+      _event['eventType']?.toString() ??
       AttendancePolicy.eventTypeContinuous;
 
   bool get _isInOut => _eventType == AttendancePolicy.eventTypeInOut;
 
-  List<AttendanceHalf> get _halves => AttendancePolicy.inOutHalves(widget.eventData);
+  List<AttendanceHalf> get _halves => AttendancePolicy.inOutHalves(_event);
 
   LatLng? get _studentPoint => _currentPosition == null
       ? null
@@ -185,10 +233,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       }
     });
 
-    final untilEnd = _eventEndTimestamp.toDate().difference(DateTime.now());
-    _eventEndTimer = Timer(untilEnd + const Duration(seconds: 5), () {
-      unawaited(_finalizeIfEnded());
-    });
+    _scheduleEndTimer();
   }
 
   Future<bool> _ensureLocationAccess() async {
@@ -283,7 +328,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     try {
       currentlyInside = await GeofencingService.isStudentInsideEvent(
         pos,
-        widget.eventData,
+        _event,
       );
     } catch (e) {
       if (!mounted) return;
@@ -319,15 +364,15 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         halves: _halves,
         isInside: currentlyInside,
         checkOutRequested: checkOutRequested,
-        lateCutoffMinutes: AttendancePolicy.lateCutoffOf(widget.eventData),
-        checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
+        lateCutoffMinutes: AttendancePolicy.lateCutoffOf(_event),
+        checkInOpenMinutes: AttendancePolicy.checkInOpenOf(_event),
       );
       if (updated == null && checkOutRequested) {
         _showMessage(_checkOutBlockedReason(currentlyInside, now.toDate()));
       }
     } else {
       final opens = _eventStartTimestamp.toDate().subtract(
-        Duration(minutes: AttendancePolicy.checkInOpenOf(widget.eventData)),
+        Duration(minutes: AttendancePolicy.checkInOpenOf(_event)),
       );
       final inWindow =
           !now.toDate().isBefore(opens) &&
@@ -338,7 +383,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
               verifiedAt: now,
               eventStart: _eventStartTimestamp.toDate(),
               isInside: currentlyInside,
-              lateCutoffMinutes: AttendancePolicy.lateCutoffOf(widget.eventData),
+              lateCutoffMinutes: AttendancePolicy.lateCutoffOf(_event),
             )
           : null;
     }
@@ -353,7 +398,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     final index = AttendancePolicy.halfIndexAt(
       _halves,
       now,
-      checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
+      checkInOpenMinutes: AttendancePolicy.checkInOpenOf(_event),
     );
     if (index == null) return 'Check-out is not open right now.';
     final opens = AttendancePolicy.checkOutOpensAt(_halves[index]);
@@ -362,6 +407,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
 
   /// Saves without awaiting: offline, Firestore queues the write and syncs later.
   void _save(Map<String, dynamic> data) {
+    if (_eventDeleted) return;
     final status = data['status']?.toString() ?? 'Present';
     _record = {
       ...data,
@@ -372,7 +418,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       'eventType': _eventType,
       'pointsAwarded': AttendancePolicy.pointsFor(
         status,
-        AttendancePolicy.basePointsOf(widget.eventData),
+        AttendancePolicy.basePointsOf(_event),
       ),
     };
     final wasFinal = data['timeOut'] != null;
@@ -389,7 +435,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   Future<bool> _finalizeIfEnded() async {
     final done = AttendancePolicy.finalizeIfEnded(
       _record,
-      widget.eventData,
+      _event,
       DateTime.now(),
     );
     if (done == null) {
@@ -463,7 +509,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   int? get _currentHalfIndex => AttendancePolicy.halfIndexAt(
     _halves,
     DateTime.now(),
-    checkInOpenMinutes: AttendancePolicy.checkInOpenOf(widget.eventData),
+    checkInOpenMinutes: AttendancePolicy.checkInOpenOf(_event),
   );
 
   String _halfName(int index) =>
@@ -536,7 +582,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         final next = _halves.where((h) => h.start.isAfter(DateTime.now()));
         return next.isEmpty
             ? 'Check-in is closed for this event.'
-            : 'Next check-in opens at ${DateFormat('h:mm a').format(next.first.start.subtract(Duration(minutes: AttendancePolicy.checkInOpenOf(widget.eventData))))}.';
+            : 'Next check-in opens at ${DateFormat('h:mm a').format(next.first.start.subtract(Duration(minutes: AttendancePolicy.checkInOpenOf(_event))))}.';
       }
       final half = AttendancePolicy.halvesOf(_record, _halves.length)[index];
       if (half['timeIn'] == null) {
@@ -807,14 +853,14 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         const SizedBox(height: 6),
         _headerDetail(
           Icons.location_on_outlined,
-          widget.eventData['venueName']?.toString() ?? 'Event venue',
+          _event['venueName']?.toString() ?? 'Event venue',
         ),
-        if (widget.eventData['venueAddress']?.toString().trim().isNotEmpty ==
+        if (_event['venueAddress']?.toString().trim().isNotEmpty ==
             true)
           Padding(
             padding: const EdgeInsets.only(left: 28, top: 4),
             child: Text(
-              widget.eventData['venueAddress'].toString(),
+              _event['venueAddress'].toString(),
               style: const TextStyle(color: Colors.white, fontSize: 13),
             ),
           ),
