@@ -32,6 +32,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   String _venueName = "";
   String _venueAddress = "";
   int _lateCutoff = 15;
+  String _continuousRequirement = AttendancePolicy.requireBoth;
+  String _morningRequirement = AttendancePolicy.requireBoth;
+  String _afternoonRequirement = AttendancePolicy.requireBoth;
   String _eventType = AttendancePolicy.eventTypeContinuous;
   final TextEditingController _pointsController = TextEditingController(text: '10');
   
@@ -67,6 +70,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       _venueName = data['venueName'] ?? '';
       _venueAddress = data['venueAddress'] ?? '';
       _lateCutoff = data['lateCutoffMinutes'] ?? 15;
+      _continuousRequirement = AttendancePolicy.requirementOf(data, 'continuousRequirement');
+      _morningRequirement = AttendancePolicy.requirementOf(data, 'morningRequirement');
+      _afternoonRequirement = AttendancePolicy.requirementOf(data, 'afternoonRequirement');
 
       if (data['lat'] != null && data['lng'] != null) {
         _selectedLocation = LatLng((data['lat'] as num).toDouble(), (data['lng'] as num).toDouble());
@@ -308,6 +314,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       
       eventPayload['startTime'] = Timestamp.fromDate(mIn);
       eventPayload['endTime'] = Timestamp.fromDate(aOut);
+      eventPayload['morningRequirement'] = _morningRequirement;
+      eventPayload['afternoonRequirement'] = _afternoonRequirement;
     } else {
       final startDateTime = DateTime(_startDate!.year, _startDate!.month, _startDate!.day, _startTime!.hour, _startTime!.minute);
       final endDateTime = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, _endTime!.hour, _endTime!.minute);
@@ -321,6 +329,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
       eventPayload['startTime'] = Timestamp.fromDate(startDateTime);
       eventPayload['endTime'] = Timestamp.fromDate(endDateTime);
+      eventPayload['continuousRequirement'] = _continuousRequirement;
     }
 
     try {
@@ -596,6 +605,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       icon: Icons.access_time,
       children: [
         if (_eventType == AttendancePolicy.eventTypeContinuous || _eventType == 'type2_continuous') ...[
+          _buildRequirementDropdown(_continuousRequirement, (v) => setState(() => _continuousRequirement = v)),
           Row(
             children: [
               Expanded(child: _buildPickerField('Start Date *', _startDate == null ? 'dd/mm/yyyy' : DateFormat('dd/MM/yyyy').format(_startDate!), () => _selectDate(true))),
@@ -616,6 +626,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           const SizedBox(height: 16),
           const Text('Morning Session', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
+          _buildRequirementDropdown(_morningRequirement, (v) => setState(() => _morningRequirement = v)),
           Row(
             children: [
               Expanded(child: _buildPickerField('Morning Time In *', _morningIn == null ? '--:-- --' : _morningIn!.format(context), () => _selectSpecificTime('morning', true))),
@@ -626,6 +637,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           const SizedBox(height: 16),
           const Text('Afternoon Session', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
+          _buildRequirementDropdown(_afternoonRequirement, (v) => setState(() => _afternoonRequirement = v)),
           Row(
             children: [
               Expanded(child: _buildPickerField('Afternoon Time In *', _afternoonIn == null ? '--:-- --' : _afternoonIn!.format(context), () => _selectSpecificTime('afternoon', true))),
@@ -635,8 +647,42 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           ),
         ],
         const SizedBox(height: 16),
-        _buildTextField('Late Cutoff (minutes after start) *', '15', _lateCutoff.toString(), (val) => _lateCutoff = int.tryParse(val) ?? 15, type: TextInputType.number),
+        DropdownButtonFormField<int>(
+          key: const Key('late-cutoff'),
+          initialValue: _lateCutoff,
+          isExpanded: true,
+          decoration: _dropdownDecoration('Late Cutoff (minutes after start) *'),
+          items: [
+            for (final m in {10, 15, 30, 60, _lateCutoff}.toList()..sort())
+              DropdownMenuItem(value: m, child: Text('$m minutes')),
+          ],
+          onChanged: (v) => setState(() => _lateCutoff = v ?? 15),
+        ),
       ],
+    );
+  }
+
+  InputDecoration _dropdownDecoration(String label) => InputDecoration(
+    labelText: label,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+  );
+
+  /// What students must do in this session; the matching time pickers stay required
+  /// because they define when the session runs.
+  Widget _buildRequirementDropdown(String value, ValueChanged<String> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DropdownButtonFormField<String>(
+        initialValue: value,
+        isExpanded: true,
+        decoration: _dropdownDecoration('Students must record'),
+        items: [
+          for (final e in AttendancePolicy.requirementLabels.entries)
+            DropdownMenuItem(value: e.key, child: Text(e.value)),
+        ],
+        onChanged: (v) => onChanged(v ?? AttendancePolicy.requireBoth),
+      ),
     );
   }
 

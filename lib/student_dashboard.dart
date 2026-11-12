@@ -11,6 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 import 'attendance_policy.dart';
+import 'privacy_dashboard_screen.dart';
+import 'utils/security_utils.dart';
+import 'repositories/student_repository.dart';
 import 'device_binding.dart';
 import 'event_tracking_screen.dart';
 import 'joined_events_store.dart';
@@ -38,6 +41,8 @@ class StudentDashboardScreen extends StatefulWidget {
 }
 
 class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
+  final IStudentEventRepository _studentEventRepo =
+      FirebaseStudentEventRepository();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final Color _primaryGreen = const Color(0xFF1E7F5A);
@@ -214,7 +219,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
     if (done == null) return false;
     // Not awaited: offline, Firestore queues the write.
-    attendanceRef.set(done, SetOptions(merge: true)).catchError((Object e) {
+    attendanceRef.set(SecurityUtils.signed(done), SetOptions(merge: true)).catchError((Object e) {
       debugPrint('Could not finalize attendance: $e');
     });
     return true;
@@ -865,6 +870,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) => _AttendanceRecordTile(
                         data: records[index].data() as Map<String, dynamic>,
+                        onAppeal: () => _showAppealDialog(
+                          records[index].id,
+                          records[index].data() as Map<String, dynamic>,
+                        ),
                       ),
                     ),
                   ),
@@ -875,6 +884,86 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _showAppealDialog(
+    String recordId,
+    Map<String, dynamic> data,
+  ) async {
+    final reasonController = TextEditingController();
+    var submitting = false;
+    final sent = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Appeal attendance'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${data['eventTitle'] ?? data['eventName'] ?? 'Event'} · ${data['status']}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                maxLength: 300,
+                decoration: const InputDecoration(
+                  labelText: 'Reason',
+                  hintText: 'e.g. Medical emergency, GPS problem',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const Text(
+                'An admin will review it. If approved, this counts as Present.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF616161)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: submitting ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      final reason = reasonController.text.trim();
+                      if (reason.isEmpty) return;
+                      setDialogState(() => submitting = true);
+                      try {
+                        await _studentEventRepo.submitAttendanceAppeal(
+                          recordId,
+                          reason,
+                        );
+                        if (context.mounted) Navigator.pop(context, true);
+                      } catch (e) {
+                        setDialogState(() => submitting = false);
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Couldn't send the appeal. Check your connection.",
+                            ),
+                          ),
+                        );
+                      }
+                    },
+              child: const Text('Send appeal'),
+            ),
+          ],
+        ),
+      ),
+    );
+    reasonController.dispose();
+    if (!mounted || sent != true) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Appeal sent for review.')));
   }
 
   Future<void> _applyProfileName(String name) async {
@@ -1049,6 +1138,13 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     ),
                   );
                 },
+                onYourData: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        PrivacyDashboardScreen(studentId: widget.studentId),
+                  ),
+                ),
                 onLocation: () => Geolocator.openLocationSettings(),
                 onPermissions: () => Geolocator.openAppSettings(),
                 onLogout: _handleLogout,
@@ -1882,9 +1978,10 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 }
 
 class _AttendanceRecordTile extends StatelessWidget {
-  const _AttendanceRecordTile({required this.data});
+  const _AttendanceRecordTile({required this.data, required this.onAppeal});
 
   final Map<String, dynamic> data;
+  final VoidCallback onAppeal;
 
   @override
   Widget build(BuildContext context) {
@@ -1906,6 +2003,18 @@ class _AttendanceRecordTile extends StatelessWidget {
         : Colors.red.shade700;
     final pts =
         data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
+    final appealStatus = data['appealStatus']?.toString() ?? 'none';
+    // Only finished Late/Partial records can be appealed, once.
+    final canAppeal =
+        data['timeOut'] != null &&
+        (status == 'Late' || status == 'Partial') &&
+        appealStatus == 'none';
+    final appealLabel = switch (appealStatus) {
+      'pending' => 'Appeal pending review',
+      'approved' => 'Appeal approved',
+      'rejected' => 'Appeal rejected',
+      _ => null,
+    };
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1944,6 +2053,30 @@ class _AttendanceRecordTile extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (appealLabel != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    appealLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.blue.shade800,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+                if (canAppeal)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onAppeal,
+                      icon: const Icon(Icons.gavel_outlined, size: 18),
+                      label: const Text('Appeal'),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(48, 40),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

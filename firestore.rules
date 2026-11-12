@@ -55,6 +55,16 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Blocked check-ins (spoofed GPS, emulator, rooted phone). Students can only add their own.
+    match /security_logs/{logId} {
+      allow read, delete: if isAdmin();
+      allow create: if isAdmin() || (
+        ownsStudent(request.resource.data.studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'eventId', 'violationReason', 'timestamp'])
+        && request.resource.data.timestamp == request.time
+      );
+    }
+
     // EVENTS
     match /events/{eventId} {
       allow read: if true;
@@ -82,6 +92,14 @@ service cloud.firestore {
       return event.get('basePoints', 10);
     }
 
+    // Must match AttendancePolicy.firstRequirementOf. 'out' = only a time out is needed,
+    // so the first record is written near the end of the session and can't be late.
+    function firstRequirement(event) {
+      return event.get('eventType', '') == 'type1_in_out'
+        ? event.get('morningRequirement', 'both')
+        : event.get('continuousRequirement', 'both');
+    }
+
     function validNewRecord(docId) {
       let data = request.resource.data;
       let event = eventOf(data.eventId);
@@ -93,7 +111,7 @@ service cloud.firestore {
         && data.timeIn >= event.startTime - duration.value(event.get('checkInOpenMinutesBeforeStart', 15) + 5, 'm')
         && data.timeIn <= event.endTime
         && data.initialStatus in ['Present', 'Late']
-        && (data.timeIn <= cutoff || data.initialStatus == 'Late')
+        && (data.timeIn <= cutoff || data.initialStatus == 'Late' || firstRequirement(event) == 'out')
         && data.status in [data.initialStatus, 'Partial']
         && data.pointsAwarded == expectedPoints(data.status, basePoints(event));
     }
@@ -111,13 +129,27 @@ service cloud.firestore {
         && data.pointsAwarded == expectedPoints(data.status, basePoints(eventOf(data.eventId)));
     }
 
+    // A student may appeal a finished Late or Partial record once; an admin decides.
+    function validAppeal() {
+      let before = resource.data;
+      let data = request.resource.data;
+      return before.get('timeOut', null) != null
+        && before.status in ['Late', 'Partial']
+        && before.get('appealStatus', 'none') == 'none'
+        && data.diff(before).affectedKeys().hasOnly(['appealStatus', 'appealReason', 'appealedAt'])
+        && data.appealStatus == 'pending'
+        && data.appealReason is string
+        && data.appealReason.size() > 0
+        && data.appealReason.size() <= 300;
+    }
+
     match /attendance/{docId} {
       allow get: if isAdmin() || ownsStudent(attendanceStudent(docId));
       allow list: if isAdmin() || ownsStudent(resource.data.studentId);
       allow create: if isAdmin()
         || (ownsStudent(attendanceStudent(docId)) && validNewRecord(docId));
       allow update: if isAdmin()
-        || (ownsStudent(attendanceStudent(docId)) && validUpdate());
+        || (ownsStudent(attendanceStudent(docId)) && (validUpdate() || validAppeal()));
       // Students can never delete a record to hide being late or partial.
       allow delete: if isAdmin();
     }

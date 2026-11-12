@@ -5,8 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Thrown when this phone or the student's account is registered elsewhere.
 class DeviceBindingException implements Exception {
-  DeviceBindingException(this.message);
+  DeviceBindingException(this.message, {this.canRequestReset = false});
   final String message;
+
+  /// True when the student's own account is bound to another phone, so an
+  /// admin can move it to this one.
+  final bool canRequestReset;
   @override
   String toString() => message;
 }
@@ -16,7 +20,8 @@ class DeviceBindingException implements Exception {
 /// Phones are identified by a random ID created on first install
 /// (`androidInfo.id` is the Android build number, shared by every phone on the
 /// same firmware). Reinstalling the app creates a new ID, so the student needs
-/// an admin to reset their device (Admin > Settings > update student).
+/// an admin to reset their device (Admin > Settings > update student, or a
+/// reset request under Admin > Pending Requests).
 class DeviceBinding {
   static const _installIdKey = 'install_id';
   static const _boundStudentKey = 'bound_student_id';
@@ -72,6 +77,7 @@ class DeviceBinding {
     if (bound.isNotEmpty && bound != deviceId) {
       throw DeviceBindingException(
         'Your account is registered to a different phone. Ask your admin to reset your device.',
+        canRequestReset: true,
       );
     }
 

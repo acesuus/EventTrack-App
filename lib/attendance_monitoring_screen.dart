@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
+import 'repositories/event_repository.dart';
 import 'student_profile.dart';
+import 'utils/security_utils.dart';
 import 'manage_events_screen.dart';
 import 'admin_settings_screen.dart';
 
@@ -25,6 +27,7 @@ class AttendanceMonitoringScreen extends StatefulWidget {
 class _AttendanceMonitoringScreenState
     extends State<AttendanceMonitoringScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IEventRepository _eventRepository = FirebaseEventRepository();
 
   // Theme Colors
   final Color _primaryGreen = const Color(0xFF1E7F5A);
@@ -153,6 +156,15 @@ class _AttendanceMonitoringScreenState
           ),
         ],
       ),
+      floatingActionButton: _selectedEventId == null
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showManualCheckInById,
+              icon: const Icon(Icons.add_task),
+              label: const Text('Manual check-in'),
+              backgroundColor: _primaryGreen,
+              foregroundColor: Colors.white,
+            ),
       bottomNavigationBar: _buildBottomNav(),
     );
   }
@@ -365,6 +377,13 @@ class _AttendanceMonitoringScreenState
             combinedItem['status'] = status;
             combinedItem['timeIn'] = attendanceRecord['timeIn'];
             combinedItem['timeOut'] = attendanceRecord['timeOut'];
+            combinedItem['tampered'] =
+                SecurityUtils.looksTampered(
+                  Map<String, dynamic>.from(attendanceRecord),
+                ) ||
+                attendanceRecord['serverStatusMismatch'] == true;
+            combinedItem['manualOverride'] =
+                attendanceRecord['manualOverride'] == true;
 
             totalTurnout++;
             if (status == 'Present') {
@@ -792,6 +811,29 @@ class _AttendanceMonitoringScreenState
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                 ),
                 const SizedBox(height: 8),
+                if (data['tampered'] == true)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'Flagged: check this record',
+                      style: TextStyle(
+                        color: Colors.red.shade700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                if (data['manualOverride'] == true)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'Manual check-in by admin',
+                      style: TextStyle(
+                        color: Colors.blue.shade800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
                 Text(
                   status == 'Absent'
                       ? 'No Record / -'
@@ -807,6 +849,15 @@ class _AttendanceMonitoringScreenState
             ),
           ),
           const SizedBox(width: 8),
+          if (status != 'Present')
+            IconButton(
+              icon: Icon(Icons.how_to_reg, color: _primaryGreen),
+              tooltip: 'Mark present (manual check-in)',
+              onPressed: () => _confirmManualCheckIn(
+                data['studentId'].toString(),
+                data['name']?.toString(),
+              ),
+            ),
           // Dynamic Status Badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -834,6 +885,92 @@ class _AttendanceMonitoringScreenState
         ],
       ),
     );
+  }
+
+  /// Marks a student Present without GPS, e.g. when their phone died.
+  Future<void> _confirmManualCheckIn(String studentId, String? name) async {
+    final eventId = _selectedEventId;
+    if (eventId == null) return;
+    final who = (name == null || name == 'Unknown') ? studentId : '$name ($studentId)';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mark present?'),
+        content: Text(
+          '$who will be marked Present with full points, without a location check. Your account is recorded as the one who did this.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Mark present'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await _eventRepository.executeManualFallbackCheckIn(eventId, studentId);
+      messenger.showSnackBar(
+        SnackBar(content: Text('$studentId marked present.')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't save the check-in. Check your connection."),
+        ),
+      );
+    }
+  }
+
+  /// For a student who isn't listed yet: asks for their ID first.
+  Future<void> _showManualCheckInById() async {
+    final controller = TextEditingController();
+    final id = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        String? error;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Manual check-in'),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Student ID (0000-0-0000)',
+                errorText: error,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final id = normalizeStudentId(controller.text);
+                  if (id == null) {
+                    setDialogState(
+                      () => error = 'Enter a 9-digit ID, e.g. 2023-1-2345.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(context, id);
+                },
+                child: const Text('Next'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    if (id == null || !mounted) return;
+    await _confirmManualCheckIn(id, rosterCache[id]?['name']?.toString());
   }
 
   Widget _buildBottomNav() {

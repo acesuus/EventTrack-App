@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// One attendance window of a Time In/Out event (the morning or afternoon half).
-typedef AttendanceHalf = ({DateTime start, DateTime end});
+/// [requirement] is one of the AttendancePolicy.require* values.
+typedef AttendanceHalf = ({DateTime start, DateTime end, String requirement});
 
 class AttendancePolicy {
   static const int schemaVersion = 4;
@@ -17,6 +18,32 @@ class AttendancePolicy {
 
   /// After this long without a saved inside reading, the student counts as gone.
   static const int heartbeatToleranceSeconds = 5 * 60;
+
+  /// What a student must do in a session: check in and out, only check in,
+  /// or only check out (be at the venue when it ends).
+  static const String requireBoth = 'both';
+  static const String requireIn = 'in';
+  static const String requireOut = 'out';
+  static const requirementLabels = {
+    requireBoth: 'Time in & time out',
+    requireIn: 'Time in only',
+    requireOut: 'Time out only',
+  };
+
+  /// Reads a requirement field; missing means [requireBoth].
+  static String requirementOf(Map<String, dynamic> event, String key) {
+    final value = event[key]?.toString() ?? '';
+    return requirementLabels.containsKey(value) ? value : requireBoth;
+  }
+
+  /// The requirement of the event's first session. Must match firstRequirement() in firestore.rules.
+  static String firstRequirementOf(Map<String, dynamic> event) =>
+      requirementOf(
+        event,
+        event['eventType'] == eventTypeInOut
+            ? 'morningRequirement'
+            : 'continuousRequirement',
+      );
 
   static const String eventTypeInOut = 'type1_in_out';
   static const String eventTypeContinuous = 'type2_continuous';
@@ -85,9 +112,26 @@ class AttendancePolicy {
     final aStart = at('afternoonStartTime');
     final aEnd = at('afternoonEndTime');
     if (mStart != null && mEnd != null && aStart != null && aEnd != null) {
-      return [(start: mStart, end: mEnd), (start: aStart, end: aEnd)];
+      return [
+        (
+          start: mStart,
+          end: mEnd,
+          requirement: requirementOf(event, 'morningRequirement'),
+        ),
+        (
+          start: aStart,
+          end: aEnd,
+          requirement: requirementOf(event, 'afternoonRequirement'),
+        ),
+      ];
     }
-    return [(start: at('startTime')!, end: at('endTime')!)];
+    return [
+      (
+        start: at('startTime')!,
+        end: at('endTime')!,
+        requirement: requirementOf(event, 'morningRequirement'),
+      ),
+    ];
   }
 
   /// The half whose window (check-in opening to its end) contains [now], or null.
@@ -123,14 +167,22 @@ class AttendancePolicy {
     });
   }
 
-  static String inOutFinalStatus(Map<String, dynamic> data, int halfCount) {
+  /// A half is done once its requirement is met.
+  static bool halfDone(Map<String, dynamic> part, String requirement) =>
+      requirement == requireIn ? part['timeIn'] != null : part['timeOut'] != null;
+
+  static String inOutFinalStatus(
+    Map<String, dynamic> data,
+    List<AttendanceHalf> halves,
+  ) {
     final initial = (data['initialStatus'] ?? data['status'] ?? 'Present')
         .toString();
-    final complete = halvesOf(
-      data,
-      halfCount,
-    ).where((h) => h['timeIn'] != null && h['timeOut'] != null).length;
-    return complete == halfCount ? initial : 'Partial';
+    final parts = halvesOf(data, halves.length);
+    final allDone = [
+      for (var i = 0; i < halves.length; i++)
+        halfDone(parts[i], halves[i].requirement),
+    ].every((done) => done);
+    return allDone ? initial : 'Partial';
   }
 
   /// Applies one verified location to a Time In/Out record.
@@ -156,33 +208,51 @@ class AttendancePolicy {
     final data = Map<String, dynamic>.from(existing);
     final parts = halvesOf(data, halves.length);
     final part = parts[index];
+    final requirement = halves[index].requirement;
+    final checkOutOpen = !now.isBefore(checkOutOpensAt(halves[index]));
 
-    if (part['timeIn'] == null) {
-      part['timeIn'] = verifiedAt;
-      if (data['timeIn'] == null) {
-        final status = determineInitialStatus(
-          checkInTime: now,
-          eventStart: halves.first.start,
-          lateCutoffMinutes: lateCutoffMinutes,
-        );
-        data.addAll({
-          'timeIn': verifiedAt,
-          'status': status,
-          'initialStatus': status,
-        });
+    if (requirement == requireOut) {
+      // Time out only: one check-out near the end counts as the whole half.
+      if (!checkOutRequested || part['timeOut'] != null || !checkOutOpen) {
+        return null;
       }
-    } else if (checkOutRequested &&
+      part['timeIn'] = verifiedAt;
+      part['timeOut'] = verifiedAt;
+    } else if (part['timeIn'] == null) {
+      part['timeIn'] = verifiedAt;
+    } else if (requirement == requireBoth &&
+        checkOutRequested &&
         part['timeOut'] == null &&
-        !now.isBefore(checkOutOpensAt(halves[index]))) {
+        checkOutOpen) {
       part['timeOut'] = verifiedAt;
     } else {
       return null;
     }
 
+    if (data['timeIn'] == null) {
+      // Lateness is judged on the first session, unless it only needs a time out.
+      final status = halves.first.requirement == requireOut
+          ? 'Present'
+          : determineInitialStatus(
+              checkInTime: now,
+              eventStart: halves.first.start,
+              lateCutoffMinutes: lateCutoffMinutes,
+            );
+      data.addAll({
+        'timeIn': verifiedAt,
+        'status': status,
+        'initialStatus': status,
+      });
+    }
+
     data['halves'] = parts;
-    if (parts.every((h) => h['timeOut'] != null)) {
+    final allDone = [
+      for (var i = 0; i < halves.length; i++)
+        halfDone(parts[i], halves[i].requirement),
+    ].every((done) => done);
+    if (allDone) {
       data['timeOut'] = verifiedAt;
-      data['status'] = inOutFinalStatus(data, halves.length);
+      data['status'] = inOutFinalStatus(data, halves);
     }
     return data;
   }
@@ -199,8 +269,28 @@ class AttendancePolicy {
     required DateTime eventStart,
     required bool isInside,
     int lateCutoffMinutes = defaultLateCutoffMinutes,
+    String requirement = requireBoth,
+    DateTime? eventEnd,
   }) {
     if (existing['timeOut'] != null) return null;
+
+    if (requirement == requireOut) {
+      // Time out only: being at the venue near the end is enough.
+      final opens = eventEnd?.subtract(
+        const Duration(minutes: checkOutOpenMinutesBeforeEnd),
+      );
+      if (!isInside || opens == null || verifiedAt.toDate().isBefore(opens)) {
+        return null;
+      }
+      return {
+        ...existing,
+        ...AttendanceSessionRecord.createInitial(
+          initialStatus: 'Present',
+          startedAt: verifiedAt,
+        ).finalize(verifiedAt).sessionFields(),
+        'lastVerified': verifiedAt,
+      };
+    }
 
     if (existing['timeIn'] == null) {
       if (!isInside) return null;
@@ -248,6 +338,8 @@ class AttendancePolicy {
     return {
       ...existing,
       ...next.sessionFields(),
+      // Time in only: leaving afterwards doesn't make it Partial.
+      if (requirement == requireIn) 'status': next.initialStatus,
       if (isInside) 'lastVerified': verifiedAt,
     };
   }
@@ -273,13 +365,16 @@ class AttendancePolicy {
       out = {
         ...data,
         'timeOut': endTs,
-        'status': inOutFinalStatus(data, inOutHalves(event).length),
+        'status': inOutFinalStatus(data, inOutHalves(event)),
       };
     } else {
       final record = AttendanceSessionRecord.fromFirestore(
         data,
       ).finalize(endTs, lastSeen: data['lastVerified'] as Timestamp?);
       out = {...data, ...record.sessionFields()};
+      if (requirementOf(event, 'continuousRequirement') == requireIn) {
+        out['status'] = record.initialStatus;
+      }
     }
     out['pointsAwarded'] = pointsFor(out['status'].toString(), basePointsOf(event));
     return out;

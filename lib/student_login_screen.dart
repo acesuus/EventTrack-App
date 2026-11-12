@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'device_binding.dart';
+import 'repositories/student_auth_repository.dart';
 import 'student_consent_screen.dart';
 import 'student_dashboard.dart';
 import 'student_profile.dart';
@@ -20,6 +21,8 @@ class StudentLoginScreen extends StatefulWidget {
 
 class _StudentLoginScreenState extends State<StudentLoginScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IStudentAuthRepository _studentAuthRepo =
+      FirebaseStudentAuthRepository();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   final TextEditingController _emailController = TextEditingController();
@@ -171,9 +174,23 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     try {
       await DeviceBinding.bind(studentId);
     } on DeviceBindingException catch (e) {
+      // Stay signed in until the dialog closes so a reset request can be saved.
+      var resetStatus = 'none';
+      if (e.canRequestReset) {
+        try {
+          resetStatus = await _studentAuthRepo.deviceResetStatus(studentId);
+        } on FirebaseException catch (err) {
+          debugPrint('Reset status lookup skipped: ${err.code}');
+        }
+      }
+      if (mounted) {
+        await _showSecurityAlert(
+          e.message,
+          studentId: e.canRequestReset ? studentId : null,
+          resetPending: resetStatus == 'pending',
+        );
+      }
       await _auth.signOut();
-      if (!mounted) return;
-      _showSecurityAlert(e.message);
       return;
     }
 
@@ -241,27 +258,98 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     await prefs.setBool('hasConsented', hasConsented);
   }
 
-  void _showSecurityAlert(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.gpp_bad, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Device not allowed', style: TextStyle(color: Colors.red)),
-          ],
-        ),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
+  /// With [studentId], also offers to ask an admin to move the account to this phone.
+  Future<void> _showSecurityAlert(
+    String message, {
+    String? studentId,
+    bool resetPending = false,
+  }) => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.gpp_bad, color: Colors.red),
+          SizedBox(width: 8),
+          Text('Device not allowed', style: TextStyle(color: Colors.red)),
         ],
       ),
+      content: Text(
+        resetPending
+            ? 'Your request to use this phone is waiting for admin approval. Try again later.'
+            : message,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        if (studentId != null && !resetPending)
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _showDeviceResetDialog(studentId);
+            },
+            child: const Text('Request device reset'),
+          ),
+      ],
+    ),
+  );
+
+  Future<void> _showDeviceResetDialog(String studentId) async {
+    final reasonController = TextEditingController();
+    var submitting = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Request device reset'),
+          content: TextField(
+            controller: reasonController,
+            maxLines: 3,
+            maxLength: 300,
+            decoration: const InputDecoration(
+              labelText: 'Reason',
+              hintText: 'e.g. Lost phone, new phone, reinstalled the app',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: submitting ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      final reason = reasonController.text.trim();
+                      if (reason.isEmpty) return;
+                      setDialogState(() => submitting = true);
+                      try {
+                        await _studentAuthRepo.requestDeviceReset(
+                          studentId,
+                          reason,
+                        );
+                        if (context.mounted) Navigator.pop(context);
+                        _showMessage(
+                          'Request sent. You can log in on this phone once an admin approves it.',
+                        );
+                      } catch (e) {
+                        setDialogState(() => submitting = false);
+                        _showMessage(
+                          "Couldn't send the request. Check your connection.",
+                        );
+                      }
+                    },
+              child: const Text('Send request'),
+            ),
+          ],
+        ),
+      ),
     );
+    reasonController.dispose();
   }
 
   void _navigateAfterLogin(String id, String name, bool hasConsented) {

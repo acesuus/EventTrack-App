@@ -13,6 +13,7 @@ class StudentSettingsContent extends StatelessWidget {
     required this.deviceProtected,
     required this.onEdit,
     required this.onPrivacy,
+    required this.onYourData,
     required this.onLocation,
     required this.onPermissions,
     required this.onLogout,
@@ -33,6 +34,7 @@ class StudentSettingsContent extends StatelessWidget {
   final bool deviceProtected;
   final VoidCallback onEdit;
   final VoidCallback onPrivacy;
+  final VoidCallback onYourData;
   final VoidCallback onLocation;
   final VoidCallback onPermissions;
   final VoidCallback onLogout;
@@ -192,6 +194,16 @@ class StudentSettingsContent extends StatelessWidget {
                   ? 'Accepted · View your consent'
                   : 'Review and accept the privacy notice',
               onTap: onPrivacy,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Divider(height: 1, color: StudentUi.line),
+            ),
+            _SettingsAction(
+              icon: Icons.shield_outlined,
+              title: 'Your data',
+              subtitle: 'See what EventTrack saves about you',
+              onTap: onYourData,
             ),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),

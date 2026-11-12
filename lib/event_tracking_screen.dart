@@ -10,8 +10,11 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'attendance_policy.dart';
+import 'core/permission_service.dart';
+import 'core/security_service.dart';
 import 'geofencing_service.dart';
 import 'joined_events_store.dart';
+import 'utils/security_utils.dart';
 import 'widgets/student_ui.dart';
 
 class EventTrackingScreen extends StatefulWidget {
@@ -214,6 +217,8 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     setState(() => _applyLocalState(_isInside));
     if (await _finalizeIfEnded()) return;
     if (!await _ensureLocationAccess()) return;
+    // Android 13+ hides the tracking notification without this; tracking works either way.
+    await PermissionService.requestNotificationPermission();
 
     _positionSubscription = Geolocator.getPositionStream(
       locationSettings: _buildLocationSettings(),
@@ -311,7 +316,9 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       _eventPoint.longitude,
     );
 
-    if (pos.isMocked) {
+    try {
+      await SecurityService.verifyDeviceSecurity(pos);
+    } on SecurityException catch (e) {
       if (!mounted) return;
       setState(() {
         _isInside = false;
@@ -320,7 +327,14 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         _distanceToVenueMeters = distanceInMeters;
         _currentStatus = 'Spoofing Detected';
       });
-      _showSpoofingWarning();
+      if (!_hasShownSpoofingWarning) {
+        SecurityService.logViolation(
+          widget.studentId,
+          widget.eventId,
+          e.message,
+        );
+      }
+      _showSpoofingWarning(e.message);
       return;
     }
 
@@ -384,6 +398,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
               eventStart: _eventStartTimestamp.toDate(),
               isInside: currentlyInside,
               lateCutoffMinutes: AttendancePolicy.lateCutoffOf(_event),
+              requirement: AttendancePolicy.requirementOf(
+                _event,
+                'continuousRequirement',
+              ),
+              eventEnd: _eventEndTimestamp.toDate(),
             )
           : null;
     }
@@ -409,7 +428,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   void _save(Map<String, dynamic> data) {
     if (_eventDeleted) return;
     final status = data['status']?.toString() ?? 'Present';
-    _record = {
+    _record = SecurityUtils.signed({
       ...data,
       'studentId': widget.studentId,
       'eventId': widget.eventId,
@@ -420,7 +439,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         status,
         AttendancePolicy.basePointsOf(_event),
       ),
-    };
+    });
     final wasFinal = data['timeOut'] != null;
     _attendanceRef.set(_record, SetOptions(merge: true)).catchError((Object e) {
       debugPrint('Attendance save failed: $e');
@@ -466,7 +485,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _showSpoofingWarning() {
+  void _showSpoofingWarning(String reason) {
     if (_hasShownSpoofingWarning || !mounted) return;
     _hasShownSpoofingWarning = true;
     showDialog(
@@ -477,11 +496,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red),
             SizedBox(width: 8),
-            Text('Invalid Location', style: TextStyle(color: Colors.red)),
+            Text('Security check failed', style: TextStyle(color: Colors.red)),
           ],
         ),
-        content: const Text(
-          'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\n\nPlease disable the spoofer and rejoin the event.',
+        content: Text(
+          '$reason Attendance can only be recorded on a real, unmodified phone with genuine GPS.\n\nFix this, then rejoin the event.',
         ),
         actions: [
           TextButton(
@@ -558,7 +577,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
 
   String get _statusTitle {
     if (_locationError != null) return _locationError!;
-    if (_currentStatus == 'Spoofing Detected') return 'Spoofing Detected';
+    if (_currentStatus == 'Spoofing Detected') return 'Security check failed';
     if (_isCheckingLocation) return 'Checking your location';
     if (_attendanceStatus != null) {
       return _displayAttendanceStatus(_attendanceStatus!);
@@ -585,13 +604,41 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
             : 'Next check-in opens at ${DateFormat('h:mm a').format(next.first.start.subtract(Duration(minutes: AttendancePolicy.checkInOpenOf(_event))))}.';
       }
       final half = AttendancePolicy.halvesOf(_record, _halves.length)[index];
+      final checkOutAt = DateFormat(
+        'h:mm a',
+      ).format(AttendancePolicy.checkOutOpensAt(_halves[index]));
+      switch (_halves[index].requirement) {
+        case AttendancePolicy.requireOut:
+          return half['timeOut'] == null
+              ? 'This session only needs a time out. Check out at the venue from $checkOutAt.'
+              : 'Timed out${_halfName(index)}.';
+        case AttendancePolicy.requireIn:
+          return half['timeIn'] == null
+              ? 'Go to the venue. You are checked in${_halfName(index)} automatically when your location is verified.'
+              : 'Checked in${_halfName(index)}. This session doesn\'t need a time out.';
+      }
       if (half['timeIn'] == null) {
         return 'Go to the venue. You are checked in${_halfName(index)} automatically when your location is verified.';
       }
-      return 'Checked in${_halfName(index)}. Check out at the venue from ${DateFormat('h:mm a').format(AttendancePolicy.checkOutOpensAt(_halves[index]))}. Both halves are needed to avoid Partial.';
+      return 'Checked in${_halfName(index)}. Check out at the venue from $checkOutAt. Every session is needed to avoid Partial.';
     }
+    final requirement = AttendancePolicy.requirementOf(
+      _event,
+      'continuousRequirement',
+    );
     if (_attendanceStatus == null) {
+      if (requirement == AttendancePolicy.requireOut) {
+        final opens = _eventEndTimestamp.toDate().subtract(
+          const Duration(
+            minutes: AttendancePolicy.checkOutOpenMinutesBeforeEnd,
+          ),
+        );
+        return 'Only your time out counts. Be at the venue from ${DateFormat('h:mm a').format(opens)} with this screen open.';
+      }
       return 'Go to the venue. You are checked in automatically when your location is verified.';
+    }
+    if (requirement == AttendancePolicy.requireIn) {
+      return 'You are checked in. This event only needs a time in, so leaving early won\'t change it.';
     }
     final awayMinutes = _outsideSecondsNow ~/ 60;
     final limit = AttendancePolicy.allowedOutsideSeconds ~/ 60;
@@ -788,7 +835,11 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
     final index = _currentHalfIndex;
     if (index == null) return false;
     final half = AttendancePolicy.halvesOf(_record, _halves.length)[index];
-    return half['timeIn'] != null && half['timeOut'] == null;
+    return switch (_halves[index].requirement) {
+      AttendancePolicy.requireIn => false,
+      AttendancePolicy.requireOut => half['timeOut'] == null,
+      _ => half['timeIn'] != null && half['timeOut'] == null,
+    };
   }
 
   String get _verificationLabel {
