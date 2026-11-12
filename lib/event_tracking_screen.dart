@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -7,10 +8,17 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+
+import 'core/permission_service.dart';
+import 'geofencing_service.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'attendance_policy.dart';
+import 'core/security_service.dart';
 import 'geofencing_service.dart';
+import 'utils/security_utils.dart';
+import 'utils/haversine.dart';
 
 class EventTrackingScreen extends StatefulWidget {
   final String studentId;
@@ -28,10 +36,12 @@ class EventTrackingScreen extends StatefulWidget {
   State<EventTrackingScreen> createState() => _EventTrackingScreenState();
 }
 
-class _EventTrackingScreenState extends State<EventTrackingScreen> {
+class _EventTrackingScreenState extends State<EventTrackingScreen> with WidgetsBindingObserver {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Color _primaryGreen = const Color(0xFF28A776);
   final Color _darkText = const Color(0xFF0C2D48);
+
+  StreamSubscription<Position>? _positionStreamSubscription;
 
   double get _eventRadius => (widget.eventData['radius'] as num?)?.toDouble() ?? 50.0;
   
@@ -59,12 +69,24 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
   @override
   void initState() {
     super.initState();
-    _checkAndLogLocation();
+    WidgetsBinding.instance.addObserver(this);
+    _startContinuousTracking();
   }
 
   @override
   void dispose() {
+    _positionStreamSubscription?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      debugPrint('Lifecycle: App backgrounded - Maintaining foreground service');
+    } else if (state == AppLifecycleState.resumed) {
+      debugPrint('Lifecycle: App resumed');
+    }
   }
 
   DocumentReference<Map<String, dynamic>> get _attendanceRef => _firestore
@@ -89,14 +111,8 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       ? null
       : LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
 
-  LocationSettings _buildLocationSettings() {
-    return const LocationSettings(
-      accuracy: LocationAccuracy.best,
-      distanceFilter: 0,
-    );
-  }
 
-  Future<void> _checkAndLogLocation() async {
+  Future<void> _startContinuousTracking() async {
     if (!mounted) return;
     setState(() {
       _isCheckingLocation = true;
@@ -128,30 +144,95 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       return;
     }
 
-    try {
-      Position? pos;
-      try {
-        pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (e) {
-        pos = await Geolocator.getLastKnownPosition();
-      }
-      
-      if (pos == null) {
-        if (!mounted) return;
-        setState(() {
-          _isCheckingLocation = false;
-          _locationError = 'Weak GPS signal. Please step near a window or go outside.';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Weak GPS signal. Please step near a window or go outside.')),
-        );
-        return;
-      }
+    final hasNotificationPerm = await PermissionService.requestNotificationPermission();
+    if (!hasNotificationPerm) {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingLocation = false;
+        _locationError = 'Notification permission required';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notifications must be enabled for Continuous Stay monitoring to function correctly.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
-      final distanceInMeters = Geolocator.distanceBetween(
+    await _positionStreamSubscription?.cancel();
+    _positionStreamSubscription = Geolocator.getPositionStream(
+      locationSettings: GeofencingService.buildLocationSettings(),
+    ).listen((Position position) {
+      _processPositionUpdate(position);
+    }, onError: (e) {
+      debugPrint('Error in location stream: $e');
+      if (mounted) {
+        setState(() {
+          _locationError = 'Unable to read continuous location: $e';
+        });
+      }
+    }, cancelOnError: false);
+  }
+
+  Future<void> _processPositionUpdate(Position pos) async {
+    if (_locationError != null && mounted) {
+      setState(() {
+        _locationError = null;
+      });
+    }
+
+    try {
+      await SecurityService.verifyDeviceSecurity(pos);
+    } on SecurityException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isInside = false;
+        _isCheckingLocation = false;
+        _currentStatus = 'Security Violation';
+      });
+
+      if (!_hasShownSpoofingWarning) {
+        _hasShownSpoofingWarning = true;
+        
+        FirebaseFirestore.instance.collection('security_logs').add({
+          'studentId': widget.studentId,
+          'eventId': widget.eventId,
+          'violationReason': e.message,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.gpp_bad, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Security Alert', style: TextStyle(color: Colors.red)),
+              ],
+            ),
+            content: Text(
+              '${e.message}\n\nYou cannot check into this event using a compromised environment. Please resolve the issue and try again.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pop(context); // Pop back to dashboard
+                },
+                child: const Text('Exit Event'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final distanceInMeters = HaversineUtils.calculateDistance(
         pos.latitude,
         pos.longitude,
         _eventPoint.latitude,
@@ -162,47 +243,6 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
         widget.eventData, 
         useMock: false
       );
-
-      if (pos.isMocked) {
-        if (!mounted) return;
-        setState(() {
-          _isInside = false;
-          _isCheckingLocation = false;
-          _currentPosition = pos;
-          _distanceToVenueMeters = distanceInMeters;
-          _currentStatus = 'Spoofing Detected';
-        });
-
-        if (!_hasShownSpoofingWarning) {
-          _hasShownSpoofingWarning = true;
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Invalid Location', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-              content: const Text(
-                'We detected the use of a mock location app or GPS spoofer. You cannot check into this event using fake coordinates.\n\nPlease disable the spoofer and rejoin the event.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Exit Event'),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
-      }
 
       final prefs = await SharedPreferences.getInstance();
       final isOffline = prefs.containsKey('cached_today_events');
@@ -411,6 +451,12 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
       data['eventType'] = _eventType;
       data['eventName'] = widget.eventData['title'] ?? 'Unknown Event';
       data['pointsAwarded'] = pointsAwarded;
+
+      if (data['timeIn'] != null) {
+        final record = AttendanceSessionRecord.fromFirestore(data);
+        data['signature'] = record.generateCryptographicHash(widget.studentId, widget.eventId);
+      }
+
       await _attendanceRef.set(data, SetOptions(merge: true));
     }
     
@@ -868,7 +914,7 @@ class _EventTrackingScreenState extends State<EventTrackingScreen> {
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton.icon(
-                      onPressed: _isCheckingLocation || _attendanceFinalized ? null : _checkAndLogLocation,
+                      onPressed: _isCheckingLocation || _attendanceFinalized ? null : _startContinuousTracking,
                       icon: const Icon(Icons.refresh, color: Colors.white),
                       label: Text(
                         _isCheckingLocation ? 'Checking...' : 'Refresh / Verify Location',

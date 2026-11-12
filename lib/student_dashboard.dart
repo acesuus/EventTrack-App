@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -14,8 +16,11 @@ import 'package:table_calendar/table_calendar.dart';
 import 'attendance_policy.dart';
 import 'event_tracking_screen.dart';
 import 'geofencing_service.dart';
+import 'points_ledger_screen.dart';
 import 'student_consent_screen.dart';
+import 'repositories/student_repository.dart';
 import 'student_login_screen.dart';
+import 'privacy_dashboard_screen.dart';
 
 class StudentDashboardScreen extends StatefulWidget {
   final String studentId;
@@ -46,6 +51,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
+  final Set<String> _appealedEventIds = {};
 
   Future<void> _syncOfflineData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -459,15 +465,35 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
 
     try {
       await _enforceDeviceBinding(widget.studentId);
+      
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled.');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied.');
+        }
+      }
+
       // Fetch current position to ensure the GPS sensor is active
-      await Geolocator.getCurrentPosition();
+      await Geolocator.getCurrentPosition().timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('GPS Signal Weak. Step outside or try again.')),
+      );
+      return;
     } catch (e) {
       if (!mounted) return;
       
       final errorMessage = e.toString();
       final displayMessage = errorMessage.contains('SECURITY_VIOLATION') 
           ? errorMessage.replaceAll('Exception: ', '') 
-          : 'Failed to verify location. Please ensure GPS is enabled.';
+          : 'Failed to verify location: $errorMessage';
           
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(displayMessage)),
@@ -885,6 +911,101 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
     );
   }
 
+  Future<void> _showAppealDialog(String eventId, String eventTitle, String currentStatus) async {
+    final reasonController = TextEditingController();
+    bool isSubmitting = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Submit Appeal'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Event: $eventTitle', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text('Current Status: $currentStatus'),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: reasonController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for appeal',
+                      hintText: 'e.g., Medical emergency, app glitch',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSubmitting ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final reason = reasonController.text.trim();
+                          if (reason.isEmpty) return;
+
+                          setDialogState(() => isSubmitting = true);
+
+                          try {
+                            await _firestore.collection('attendance_appeals').add({
+                              'studentId': widget.studentId,
+                              'eventId': eventId,
+                              'eventTitle': eventTitle,
+                              'originalStatus': currentStatus,
+                              'reason': reason,
+                              'status': 'Pending',
+                              'createdAt': FieldValue.serverTimestamp(),
+                            });
+
+                            if (mounted) {
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Appeal submitted and is under review.'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                              setState(() {
+                                _appealedEventIds.add(eventId);
+                              });
+                            }
+                          } catch (e) {
+                            setDialogState(() => isSubmitting = false);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to submit appeal: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildHistoryTab() {
     return Column(
       children: [
@@ -965,27 +1086,16 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                     ),
                   ),
                   Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: MediaQuery.of(context).size.width > 600 ? MediaQuery.of(context).size.width : 600,
-                        child: PaginatedDataTable(
-                          headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                          dataRowMaxHeight: 60,
-                          columns: const [
-                            DataColumn(label: Text('Event Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Event Type', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Date & Time', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold))),
-                            DataColumn(label: Text('Points', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-                          ],
-                          source: _AttendanceDataSource(records),
-                          rowsPerPage: 5,
-                          availableRowsPerPage: const [5],
-                          showFirstLastButtons: true,
-                          columnSpacing: 20.0,
-                        ),
-                      ),
+                    child: ListView.builder(
+                      itemCount: records.length,
+                      itemBuilder: (context, index) {
+                        final data = records[index].data() as Map<String, dynamic>;
+                        return HistoryCardWidget(
+                          data: data,
+                          studentId: widget.studentId,
+                          studentName: widget.studentName,
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -1065,6 +1175,21 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
                             studentId: widget.studentId,
                             studentName: widget.studentName,
                           ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionTile(
+                    icon: Icons.shield_outlined,
+                    title: 'Privacy Dashboard & Data Usage',
+                    subtitle:
+                        'See exactly how your location and data are protected',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PrivacyDashboardScreen(studentId: widget.studentId),
                         ),
                       );
                     },
@@ -1707,6 +1832,7 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
             onTap: () => setState(() => _selectedIndex = 2),
           ),
+
         ],
       ),
     );
@@ -1885,55 +2011,193 @@ class _StudentDashboardScreenState extends State<StudentDashboardScreen> {
   }
 }
 
-class _AttendanceDataSource extends DataTableSource {
-  final List<QueryDocumentSnapshot> docs;
+class HistoryCardWidget extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final String studentId;
+  final String studentName;
 
-  _AttendanceDataSource(this.docs);
+  const HistoryCardWidget({
+    super.key,
+    required this.data,
+    required this.studentId,
+    required this.studentName,
+  });
 
   @override
-  DataRow? getRow(int index) {
-    if (index >= docs.length) return null;
-    
-    final doc = docs[index];
-    final data = doc.data() as Map<String, dynamic>;
-    final eventName = data['eventName'] ?? data['eventTitle'] ?? 'Legacy Event';
-    
-    String eventTypeStr = 'Standard';
-    final type = data['eventType'];
-    if (type == 'type1_in_out') {
-      eventTypeStr = 'Time In/Out';
-    } else if (type == 'type2_continuous') {
-      eventTypeStr = 'Continuous';
+  State<HistoryCardWidget> createState() => _HistoryCardWidgetState();
+}
+
+class _HistoryCardWidgetState extends State<HistoryCardWidget> {
+  final IStudentEventRepository _studentRepo = FirebaseStudentEventRepository();
+  final TextEditingController _reasonController = TextEditingController();
+  bool _hasMockProof = false;
+  bool _isSubmitting = false;
+
+  Future<void> _submitAppeal(String recordId, StateSetter setStateDialog) async {
+    if (!_hasMockProof) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photographic proof is required.')),
+      );
+      return;
     }
     
-    final timeIn = data['timeIn'] as Timestamp?;
-    final dateStr = timeIn != null ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate()) : 'Unknown';
-    
-    final status = data['status']?.toString() ?? 'Absent';
-    Color statusColor = Colors.red;
-    if (status == 'Present') {
-      statusColor = Colors.green;
-    } else if (status == 'Late' || status == 'Partial') {
-      statusColor = Colors.orange;
+    if (_reasonController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reason for appeal is required.')),
+      );
+      return;
     }
+
+    setStateDialog(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      // Mock upload delay
+      await Future.delayed(const Duration(milliseconds: 1500));
+      
+      await _studentRepo.submitAttendanceAppeal(recordId, _reasonController.text.trim());
+
+      if (mounted) {
+        Navigator.of(context).pop(); // close dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Appeal submitted successfully with proof!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to submit appeal: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setStateDialog(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  void _showAppealDialog(String recordId, String eventTitle, String originalStatus) {
+    _reasonController.clear();
+    _hasMockProof = false;
+    _isSubmitting = false;
     
-    final pts = data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
-    
-    return DataRow(cells: [
-      DataCell(Text(eventName)),
-      DataCell(Text(eventTypeStr)),
-      DataCell(Text(dateStr)),
-      DataCell(Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold))),
-      DataCell(Text('+$pts pts', style: const TextStyle(fontWeight: FontWeight.bold))),
-    ]);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Submit Appeal'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_hasMockProof) ...[
+                    const Icon(Icons.check_circle, color: Colors.green, size: 40),
+                    const SizedBox(height: 8),
+                    const Text('proof_image_01.jpg attached', style: TextStyle(color: Colors.green)),
+                    const SizedBox(height: 16),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _isSubmitting ? null : () {
+                      setStateDialog(() {
+                        _hasMockProof = true;
+                      });
+                    },
+                    icon: _hasMockProof ? const Icon(Icons.check, color: Colors.green) : const Icon(Icons.camera_alt),
+                    label: Text(_hasMockProof ? 'Image Attached' : 'Upload Picture Proof'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _reasonController,
+                    maxLines: 3,
+                    enabled: !_isSubmitting,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason for appeal (e.g., Medical emergency)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (_isSubmitting) ...[
+                    const SizedBox(height: 16),
+                    const LinearProgressIndicator(),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: _isSubmitting ? null : () => _submitAppeal(recordId, setStateDialog),
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
-  bool get isRowCountApproximate => false;
+  Widget build(BuildContext context) {
+    final eventId = widget.data['eventId']?.toString() ?? '';
+    final recordId = '${widget.studentId}_$eventId';
+    final eventName = widget.data['eventName'] ?? widget.data['eventTitle'] ?? 'Legacy Event';
+    final type = widget.data['eventType'];
+    String eventTypeStr = type == 'type1_in_out' ? 'Time In/Out' : (type == 'type2_continuous' ? 'Continuous' : 'Standard');
+    
+    final timeIn = widget.data['timeIn'] as Timestamp?;
+    final dateStr = timeIn != null ? DateFormat('MMM d, yyyy - hh:mm a').format(timeIn.toDate()) : 'Unknown';
+    
+    final status = widget.data['status']?.toString() ?? 'Absent';
+    final appealStatus = widget.data['appealStatus']?.toString() ?? 'none';
 
-  @override
-  int get rowCount => docs.length;
+    Color statusColor = status.contains('Present') ? Colors.green : (status == 'Absent' ? Colors.red : Colors.orange);
+    final pts = widget.data['pointsAwarded'] ?? AttendancePolicy.getPointsForStatus(status);
 
-  @override
-  int get selectedRowCount => 0;
+    final canAppeal = (status == 'Late' || status == 'Partial' || status == 'Absent') && appealStatus == 'none';
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: Text(eventName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                Text('+$pts pts', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('Type: $eventTypeStr'),
+            Text('Date: $dateStr'),
+            const SizedBox(height: 4),
+            Text('Status: $status', style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
+            if (appealStatus != 'none')
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Text('Appeal Status: ${appealStatus.toUpperCase()}', style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.bold)),
+              ),
+            if (canAppeal) ...[
+              const Divider(height: 24),
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+                onPressed: () => _showAppealDialog(recordId, eventName, status),
+                child: const Text('Submit Appeal'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

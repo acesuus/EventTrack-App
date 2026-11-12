@@ -4,8 +4,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
-import 'campus_locations.dart';
 import 'attendance_policy.dart';
+import 'campus_locations.dart';
+import 'geofencing_service.dart';
+import 'repositories/event_repository.dart';
 
 class CreateEventScreen extends StatefulWidget {
   final String? eventId; // If null, we are Creating. If it has an ID, we are Editing.
@@ -19,7 +21,7 @@ class CreateEventScreen extends StatefulWidget {
 }
 
 class _CreateEventScreenState extends State<CreateEventScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IEventRepository _eventRepository = FirebaseEventRepository();
 
   // Theme Colors
   final Color _primaryGreen = const Color(0xFF28A776);
@@ -324,11 +326,10 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
       if (_isEditing) {
         // UPDATE EXISTING
-        await _firestore.collection('events').doc(widget.eventId).update(eventPayload);
+        await _eventRepository.updateEvent(widget.eventId!, eventPayload);
       } else {
         // CREATE NEW
-        eventPayload['createdAt'] = FieldValue.serverTimestamp();
-        await _firestore.collection('events').add(eventPayload);
+        await _eventRepository.createEvent(eventPayload);
       }
 
       if (!mounted) return;

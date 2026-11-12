@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 
 class AttendancePolicy {
   static const int schemaVersion = 3;
@@ -64,6 +66,9 @@ class AttendanceSessionRecord {
   final Timestamp? timeOut;
   final int totalOutsideSeconds;
   final List<Map<String, dynamic>> sessions;
+  final String appealStatus;
+  final String? appealReason;
+  final bool isTelemetryPurged;
 
   const AttendanceSessionRecord({
     required this.schemaVersion,
@@ -74,6 +79,9 @@ class AttendanceSessionRecord {
     required this.timeOut,
     required this.totalOutsideSeconds,
     required this.sessions,
+    this.appealStatus = 'none',
+    this.appealReason,
+    this.isTelemetryPurged = false,
   });
 
   factory AttendanceSessionRecord.createInitial({
@@ -122,6 +130,9 @@ class AttendanceSessionRecord {
       timeOut: data?['timeOut'] as Timestamp?,
       totalOutsideSeconds: (data?['totalOutsideSeconds'] as num?)?.toInt() ?? 0,
       sessions: normalizedSessions,
+      appealStatus: data?['appealStatus']?.toString() ?? 'none',
+      appealReason: data?['appealReason']?.toString(),
+      isTelemetryPurged: data?['isTelemetryPurged'] as bool? ?? false,
     );
   }
 
@@ -253,10 +264,17 @@ class AttendanceSessionRecord {
     );
   }
 
+  String generateCryptographicHash(String studentId, String eventId) {
+    final timeInMs = timeIn?.millisecondsSinceEpoch ?? 0;
+    final canonicalString = '$studentId$eventId$status$timeInMs';
+    return sha256.convert(utf8.encode(canonicalString)).toString();
+  }
+
   Map<String, dynamic> toFirestoreFields({
     required String studentId,
     required String eventId,
     required String eventTitle,
+    String? signature,
   }) {
     return {
       'schemaVersion': AttendancePolicy.schemaVersion,
@@ -270,6 +288,10 @@ class AttendanceSessionRecord {
       'timeOut': timeOut,
       'totalOutsideSeconds': totalOutsideSeconds,
       'sessions': sessions,
+      'appealStatus': appealStatus,
+      if (appealReason != null) 'appealReason': appealReason,
+      'isTelemetryPurged': isTelemetryPurged,
+      'signature': signature ?? generateCryptographicHash(studentId, eventId),
     };
   }
 
@@ -282,6 +304,9 @@ class AttendanceSessionRecord {
     Object? timeOut = _sentinel,
     int? totalOutsideSeconds,
     List<Map<String, dynamic>>? sessions,
+    String? appealStatus,
+    String? appealReason,
+    bool? isTelemetryPurged,
   }) {
     return AttendanceSessionRecord(
       schemaVersion: schemaVersion ?? this.schemaVersion,
@@ -294,6 +319,9 @@ class AttendanceSessionRecord {
           : timeOut as Timestamp?,
       totalOutsideSeconds: totalOutsideSeconds ?? this.totalOutsideSeconds,
       sessions: sessions ?? _cloneSessions(),
+      appealStatus: appealStatus ?? this.appealStatus,
+      appealReason: appealReason ?? this.appealReason,
+      isTelemetryPurged: isTelemetryPurged ?? this.isTelemetryPurged,
     );
   }
 

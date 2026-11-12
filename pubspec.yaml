@@ -43,6 +43,7 @@ dependencies:
   flutter_map: ^8.2.2
   latlong2: ^0.9.1
   geolocator: ^14.0.2
+  safe_device: ^1.1.4
   device_info_plus: ^12.4.0
   shared_preferences: ^2.5.4
   connectivity_plus: ^6.0.3
@@ -50,6 +51,13 @@ dependencies:
   csv: ^6.0.0
   path_provider: ^2.1.5
   share_plus: ^10.1.0
+  crypto: ^3.0.7
+  sqflite: ^2.4.3
+  path: ^1.9.1
+  uuid: ^4.6.0
+  image_picker: ^1.2.3
+  firebase_storage: ^13.5.0
+  permission_handler: ^13.0.2
 
 dev_dependencies:
   flutter_test:

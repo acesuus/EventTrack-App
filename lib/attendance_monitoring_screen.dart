@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'manage_events_screen.dart';
 import 'admin_settings_screen.dart';
+import 'repositories/event_repository.dart';
+
 class AttendanceMonitoringScreen extends StatefulWidget {
   const AttendanceMonitoringScreen({super.key});
 
@@ -12,6 +14,8 @@ class AttendanceMonitoringScreen extends StatefulWidget {
 
 class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IEventRepository _eventRepository = FirebaseEventRepository();
+  final TextEditingController _studentIdController = TextEditingController();
 
   // Theme Colors
   final Color _primaryGreen = const Color(0xFF28A776);
@@ -47,6 +51,12 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
   void initState() {
     super.initState();
     _fetchRoster();
+  }
+
+  @override
+  void dispose() {
+    _studentIdController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchRoster() async {
@@ -111,6 +121,15 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
           ),
         ],
       ),
+      floatingActionButton: _selectedEventId != null
+          ? FloatingActionButton.extended(
+              onPressed: _showGlobalManualCheckInDialog,
+              label: const Text('Manual Check-In'),
+              icon: const Icon(Icons.add_task),
+              backgroundColor: _primaryGreen,
+              foregroundColor: Colors.white,
+            )
+          : null,
       bottomNavigationBar: _buildBottomNav(),
     );
   }
@@ -442,20 +461,27 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Student ${data['studentId']}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _darkText)),
-              const SizedBox(height: 4),
-              Text('ID: ${data['studentId']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-              const SizedBox(height: 8),
-              Text(
-                status == 'Partial' 
-                    ? 'In: ${_formatTime(data['timeIn'])} • Out: ${_formatTime(data['timeOut'])}'
-                    : 'In: ${_formatTime(data['timeIn'])}',
-                style: const TextStyle(color: Colors.grey, fontSize: 11),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Student ${data['studentId']}",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _darkText),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+                const SizedBox(height: 4),
+                Text('ID: ${data['studentId']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                const SizedBox(height: 8),
+                Text(
+                  status == 'Partial' 
+                      ? 'In: ${_formatTime(data['timeIn'])} • Out: ${_formatTime(data['timeOut'])}'
+                      : 'In: ${_formatTime(data['timeIn'])}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                ),
+              ],
+            ),
           ),
           
           Row(
@@ -530,6 +556,63 @@ class _AttendanceMonitoringScreenState extends State<AttendanceMonitoringScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to override: $e'), backgroundColor: Colors.red)
         );
+      }
+    }
+  }
+
+  Future<void> _showGlobalManualCheckInDialog() async {
+    _studentIdController.clear();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Manual Fallback Check-In'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Manually check in a student who cannot use GPS.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _studentIdController,
+              decoration: const InputDecoration(
+                labelText: 'Student ID',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Submit', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      final studentId = _studentIdController.text.trim();
+      if (studentId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a Student ID.'), backgroundColor: Colors.orange)
+        );
+        return;
+      }
+
+      try {
+        await _eventRepository.executeManualFallbackCheckIn(_selectedEventId!, studentId);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Student manually checked in.'), backgroundColor: Colors.green)
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to override: $e'), backgroundColor: Colors.red)
+          );
+        }
       }
     }
   }

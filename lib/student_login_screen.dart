@@ -5,6 +5,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'repositories/student_auth_repository.dart';
 
 import 'student_consent_screen.dart';
 import 'student_dashboard.dart';
@@ -17,7 +18,9 @@ class StudentLoginScreen extends StatefulWidget {
 }
 
 class _StudentLoginScreenState extends State<StudentLoginScreen> {
+  final _formKey = GlobalKey<FormState>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IStudentAuthRepository _studentAuthRepo = FirebaseStudentAuthRepository();
 
   // Controllers for the new UI fields
   final TextEditingController _emailController = TextEditingController();
@@ -72,56 +75,22 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         throw Exception("Could not verify secure device ID.");
       }
 
-      // 1. CLOUD DEVICE GATEKEEPER: Check if this phone is already owned by someone else
-      final deviceCheck = await _firestore.collection('users')
-          .where('registeredDeviceId', isEqualTo: currentDeviceId)
-          .get(const GetOptions(source: Source.server));
+      // Use Clean Architecture: Pass login logic to repository
+      try {
+        final result = await _studentAuthRepo.loginAndVerifyDevice(studentId, emailOrId, currentDeviceId);
+        
+        final studentName = result['studentName'] as String;
+        final hasConsented = result['hasConsented'] as bool;
 
-      if (deviceCheck.docs.isNotEmpty) {
-        final ownerId = deviceCheck.docs.first.id;
-        if (ownerId != studentId) {
-          // BLOCK LOGIN: This physical phone belongs to a different student ID
-          if (!mounted) return;
-          _showSecurityAlert(); // Shows the "Account Proxy Detected" dialog
+        await _saveLoginSession(studentId, studentName, hasConsented);
+        _navigateAfterLogin(studentId, studentName, hasConsented);
+      } catch (e) {
+        final errorStr = e.toString();
+        if (errorStr.contains('SECURITY_VIOLATION')) {
+          await _handleSecurityBlock(studentId);
           return;
-        }
-      }
-
-      DocumentReference userRef = _firestore.collection('users').doc(studentId);
-      DocumentSnapshot userSnap = await userRef.get(const GetOptions(source: Source.server));
-
-      if (!userSnap.exists) {
-        // First time registration: Bind this device to this new account
-        await userRef.set({
-          'studentId': studentId,
-          'email': emailOrId,
-          'name': 'Student $studentId',
-          'registeredDeviceId': currentDeviceId,
-          'hasConsented': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        await _saveLoginSession(studentId, 'Student $studentId', false);
-        _navigateAfterLogin(studentId, 'Student $studentId', false);
-      } else {
-        // Returning user check
-        Map<String, dynamic> userData = userSnap.data() as Map<String, dynamic>;
-        String? registeredDevice = userData['registeredDeviceId'];
-        final hasConsented = userData['hasConsented'] == true;
-        final studentName = userData['name'] ?? 'Student';
-
-        if (registeredDevice == null || registeredDevice.isEmpty) {
-          // Claim the device if the account has no bound ID yet
-          await userRef.update({'registeredDeviceId': currentDeviceId});
-          await _saveLoginSession(studentId, studentName, hasConsented);
-          _navigateAfterLogin(studentId, studentName, hasConsented);
-        } else if (registeredDevice != currentDeviceId) {
-          // Block if the account is trying to log in from an unauthorized phone
-          if (!mounted) return;
-          _showSecurityAlert();
         } else {
-          // Standard authorized login
-          await _saveLoginSession(studentId, studentName, hasConsented);
-          _navigateAfterLogin(studentId, studentName, hasConsented);
+          rethrow;
         }
       }
     } catch (e) {
@@ -164,7 +133,33 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
     await prefs.setBool('hasConsented', hasConsented);
   }
 
-  void _showSecurityAlert() {
+  Future<void> _handleSecurityBlock(String studentId) async {
+    final userSnap = await _firestore.collection('users').doc(studentId).get(const GetOptions(source: Source.server));
+    
+    if (!mounted) return;
+
+    if (userSnap.exists && userSnap.data()?['deviceResetStatus'] == 'pending') {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Request Pending'),
+          content: const Text(
+              'Your request to register this new device is currently pending admin approval. Please check back later.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      _showSecurityAlert(studentId);
+    }
+  }
+
+  void _showSecurityAlert(String studentId) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -181,11 +176,131 @@ class _StudentLoginScreenState extends State<StudentLoginScreen> {
         ),
         actions: [
           TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showDeviceResetDialog(studentId);
+            },
+            child: const Text('Request Device Reset'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showDeviceResetDialog(String studentId) async {
+    final reasonController = TextEditingController();
+    bool isSubmitting = false;
+    bool _isMockFileAttached = false;
+    bool _isUploadingMockFile = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Request Device Reset'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Please provide a reason for changing your device.'),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: reasonController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason (e.g., Lost phone, upgraded)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (!_isMockFileAttached)
+                    OutlinedButton.icon(
+                      onPressed: _isUploadingMockFile
+                          ? null
+                          : () async {
+                              setDialogState(() => _isUploadingMockFile = true);
+                              await Future.delayed(const Duration(seconds: 1));
+                              setDialogState(() {
+                                _isUploadingMockFile = false;
+                                _isMockFileAttached = true;
+                              });
+                            },
+                      icon: _isUploadingMockFile
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.upload_file),
+                      label: const Text('Upload Proof (ID/Document)'),
+                    ),
+                  if (_isMockFileAttached)
+                    const Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('Attached: proof_document.jpg', style: TextStyle(color: Colors.green))),
+                      ],
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSubmitting ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: (isSubmitting || !_isMockFileAttached)
+                      ? null
+                      : () async {
+                          final reason = reasonController.text.trim();
+                          if (reason.isEmpty) return;
+
+                          setDialogState(() => isSubmitting = true);
+
+                          try {
+                            await _studentAuthRepo.requestDeviceReset(studentId, reason);
+
+                            if (mounted) {
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Device reset request submitted.'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            setDialogState(() => isSubmitting = false);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to submit request: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

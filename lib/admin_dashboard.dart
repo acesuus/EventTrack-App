@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'admin_requests_screen.dart';
 import 'admin_settings_screen.dart';
 import 'attendance_monitoring_screen.dart';
 import 'create_event_screen.dart';
@@ -211,6 +212,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 isPrimary: false, 
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const ManageEventsScreen()));
+                }
+              ),
+              _buildActionItem(
+                title: 'Pending Requests',
+                icon: Icons.pending_actions,
+                isPrimary: false,
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const AdminRequestsScreen()));
                 }
               ),
             ],

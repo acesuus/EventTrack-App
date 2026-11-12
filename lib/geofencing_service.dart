@@ -3,29 +3,31 @@ import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:safe_device/safe_device.dart';
 
 class GeofencingService {
   static DateTime? _lastAttemptTime;
   static int _failedAttempts = 0;
   static DateTime? _lockoutEndTime;
 
-  static Future<bool> _isEnvironmentSecure(Position position) async {
-    // TODO: Re-enable mock location block before production
-    // if (position.isMocked) {
-    //   return false;
-    // }
-
-    if (!kIsWeb) {
-      final deviceInfo = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfo.androidInfo;
-        if (!androidInfo.isPhysicalDevice) return false;
-      } else if (Platform.isIOS) {
-        final iosInfo = await deviceInfo.iosInfo;
-        if (!iosInfo.isPhysicalDevice) return false;
-      }
+  static LocationSettings buildLocationSettings() {
+    if (Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 0,
+        forceLocationManager: false,
+        intervalDuration: const Duration(seconds: 10),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationText: "Monitoring your continuous stay attendance.",
+          notificationTitle: "EventTrack Active",
+          enableWakeLock: true,
+        ),
+      );
     }
-    return true;
+    return const LocationSettings(
+      accuracy: LocationAccuracy.best,
+      distanceFilter: 0,
+    );
   }
 
   /// Validates if a student's current position is inside the event's polygon geofence.
@@ -59,9 +61,6 @@ class GeofencingService {
       debugPrint("GeofencingService: Using MOCK position (Lat: ${studentPos.latitude}, Lng: ${studentPos.longitude})");
     }
 
-    if (!(await _isEnvironmentSecure(studentPos))) {
-      throw Exception('SECURITY_VIOLATION: Environment integrity compromised. Emulators and Mock Locations are strictly prohibited.');
-    }
 
     try {
       // Extract the polygon points saved by the Admin during event creation

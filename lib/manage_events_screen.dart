@@ -6,6 +6,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'admin_settings_screen.dart';
 import 'attendance_monitoring_screen.dart';
 import 'create_event_screen.dart';
+import 'repositories/event_repository.dart';
 
 class ManageEventsScreen extends StatefulWidget {
   const ManageEventsScreen({super.key});
@@ -15,7 +16,7 @@ class ManageEventsScreen extends StatefulWidget {
 }
 
 class _ManageEventsScreenState extends State<ManageEventsScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final IEventRepository _eventRepository = FirebaseEventRepository();
 
   // Theme Colors matching your UI
   final Color _primaryGreen = const Color(0xFF28A776);
@@ -35,19 +36,17 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
     return Scaffold(
       backgroundColor: _lightGreenBg,
       appBar: _buildAppBar(),
-      body: StreamBuilder<QuerySnapshot>(
-        // REAL FIREBASE CONNECTION
-        stream: _firestore.collection('events').orderBy('startTime', descending: true).snapshots(),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _eventRepository.getActiveEventsStream(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final allEvents = snapshot.hasData ? snapshot.data!.docs : [];
+          final allEvents = snapshot.hasData ? snapshot.data! : [];
 
           // Filter events for the selected day
-          final filteredEvents = allEvents.where((doc) {
-            var data = doc.data() as Map<String, dynamic>;
+          final filteredEvents = allEvents.where((data) {
             if (data['startTime'] == null) return false;
             DateTime eventDate = (data['startTime'] as Timestamp).toDate();
             return isSameDay(eventDate, _selectedDay);
@@ -94,8 +93,7 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                       titleCentered: true,
                     ),
                     eventLoader: (day) {
-                      return allEvents.where((doc) {
-                        var data = doc.data() as Map<String, dynamic>;
+                      return allEvents.where((data) {
                         if (data['startTime'] == null) return false;
                         DateTime eventDate = (data['startTime'] as Timestamp).toDate();
                         return isSameDay(eventDate, day);
@@ -141,9 +139,8 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: filteredEvents.length,
                           itemBuilder: (context, index) {
-                            var doc = filteredEvents[index];
-                            var data = doc.data() as Map<String, dynamic>;
-                            var eventId = doc.id;
+                            var data = filteredEvents[index];
+                            var eventId = data['id'];
                             return _buildEventCard(eventId, data);
                           },
                         ),
@@ -167,10 +164,10 @@ class _ManageEventsScreenState extends State<ManageEventsScreen> {
         icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 18),
         onPressed: () => Navigator.pop(context),
       ),
-      title: StreamBuilder<QuerySnapshot>(
-        stream: _firestore.collection('events').snapshots(),
+      title: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _eventRepository.getActiveEventsStream(),
         builder: (context, snapshot) {
-          int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+          int count = snapshot.hasData ? snapshot.data!.length : 0;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

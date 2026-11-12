@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'utils/haversine.dart';
 
 class StudentHomeScreen extends StatefulWidget {
   final String studentId;
@@ -104,7 +105,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       double radius = (data['radius'] as num).toDouble();
 
       // 2. The Math: Calculate distance
-      double distanceInMeters = Geolocator.distanceBetween(
+      double distanceInMeters = HaversineUtils.calculateDistance(
         currentPos.latitude, currentPos.longitude,
         eventLat, eventLng,
       );
